@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Pil kısıtlamasından muaf olmak için (servis arka planda uyumasın) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Başka uygulamaları (Migpack) adından bulabilmek için -->
     <queries>
         <intent>
