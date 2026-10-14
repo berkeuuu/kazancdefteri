@@ -43,6 +43,7 @@ public class MainActivity extends Activity {
 
         web.addJavascriptInterface(new Bridge(), "Android");
         web.loadUrl("file:///android_asset/index.html");
+        Reminder.schedule(this);
     }
 
     @Override
@@ -51,6 +52,16 @@ public class MainActivity extends Activity {
         ReaderService.dismissOverlay();
         if (web != null) {
             web.evaluateJavascript("window.onAppResume && window.onAppResume()", null);
+        }
+    }
+
+    private void openNotifSettingsNow() {
+        try {
+            Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            i.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "Bildirim ayarı açılamadı", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -86,6 +97,43 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean serviceEnabled() {
             return serviceOn();
+        }
+
+        @JavascriptInterface
+        public boolean notifOk() {
+            try {
+                android.app.NotificationManager nm =
+                        (android.app.NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                return nm.areNotificationsEnabled();
+            } catch (Exception e) {
+                return true;
+            }
+        }
+
+        @JavascriptInterface
+        public void requestNotify() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (android.os.Build.VERSION.SDK_INT >= 33
+                            && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                            != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77);
+                    } else {
+                        openNotifSettingsNow();
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openNotifSettings() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    openNotifSettingsNow();
+                }
+            });
         }
 
         @JavascriptInterface
