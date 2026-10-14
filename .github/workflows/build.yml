@@ -1,0 +1,37 @@
+name: APK derle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: APK derle
+        run: gradle assembleRelease --no-daemon
+
+      - name: Dosyayı hazırla
+        run: cp app/build/outputs/apk/release/app-release.apk KazancDefteri.apk
+
+      - name: Releases'e yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: surum-${{ github.run_number }}
+          name: Kazanç Defteri ${{ github.run_number }}
+          files: KazancDefteri.apk
