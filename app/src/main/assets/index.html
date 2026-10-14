@@ -859,6 +859,10 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     renderReview();
     if (snaps.length && sig !== rd.shown) {
       rd.shown = sig;
+      if (d.crawl === 'done' && rd.cands.length) {
+        R.add.click();
+        return;
+      }
       if (rd.cands.length || rd.month) {
         setTab('read', true);
         rmsg((d.crawl === 'done' ? 'Okuma bitti. ' : 'Okuma sürüyor olabilir. ') + rd.cands.length + ' gün bulundu. Aşağıda kontrol et.', false);
@@ -871,7 +875,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     try { res = A.startRead(); } catch (e) { res = 'err'; }
     if (res === 'ok') {
       R.picker.hidden = true;
-      rmsg('Migpack açıldı. Geçmiş Siparişlerim > Günlük ekranını aç ve ayı seç. Gün kartlarını uygulama kendisi açıp kaydıracak. "Okuma bitti" yazısını görünce buraya dön.', false);
+      rmsg('Migpack açıldı. Geçmiş Siparişlerim > Günlük ekranını aç ve ayı seç. Okuma kendiliğinden başlar; "Okuma tamamlandı" çıkınca Tamam\'a bas.', false);
     } else if (res === 'no_service') {
       rmsg('Önce okuma iznini aç.', true);
       updateReadStatus();
