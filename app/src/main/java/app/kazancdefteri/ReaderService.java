@@ -154,6 +154,10 @@ public class ReaderService extends AccessibilityService {
     public void onInterrupt() {
     }
 
+    public static boolean isAlive() {
+        return instance != null;
+    }
+
     /** Uygulama öne gelince çağrılır: okuma ekranını kaldırır. */
     public static void dismissOverlay() {
         final ReaderService s = instance;

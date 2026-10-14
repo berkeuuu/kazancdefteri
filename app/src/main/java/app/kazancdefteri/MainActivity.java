@@ -89,6 +89,84 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean serviceAlive() {
+            return ReaderService.isAlive();
+        }
+
+        @JavascriptInterface
+        public boolean batteryOk() {
+            try {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                return pm.isIgnoringBatteryOptimizations(getPackageName());
+            } catch (Exception e) {
+                return true;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean bgConfirmed() {
+            return prefs().getBoolean("bg_ok", false);
+        }
+
+        @JavascriptInterface
+        public void setBgConfirmed(boolean v) {
+            prefs().edit().putBoolean("bg_ok", v).apply();
+        }
+
+        @JavascriptInterface
+        public void requestBattery() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                        i.setData(Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    } catch (Exception e) {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                        } catch (Exception e2) {
+                            Toast.makeText(MainActivity.this, "Pil ayarı açılamadı", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+            });
+        }
+
+        /** Üreticiye özel "otomatik başlat / arka plan" sayfasını dener, olmazsa uygulama bilgisini açar. */
+        @JavascriptInterface
+        public void openAutostart() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    String[][] list = new String[][]{
+                            {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
+                            {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+                            {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
+                            {"com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"},
+                            {"com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"},
+                            {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"},
+                            {"com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"},
+                            {"com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"}
+                    };
+                    for (String[] c : list) {
+                        try {
+                            Intent i = new Intent();
+                            i.setClassName(c[0], c[1]);
+                            startActivity(i);
+                            return;
+                        } catch (Exception e) {
+                            // sıradakini dene
+                        }
+                    }
+                    Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                }
+            });
+        }
+
+        @JavascriptInterface
         public boolean isNight() {
             int mode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
             return mode == Configuration.UI_MODE_NIGHT_YES;
