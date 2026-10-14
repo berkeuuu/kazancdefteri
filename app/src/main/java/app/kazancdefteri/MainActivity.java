@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        ReaderService.dismissOverlay();
         if (web != null) {
             web.evaluateJavascript("window.onAppResume && window.onAppResume()", null);
         }
@@ -136,7 +137,7 @@ public class MainActivity extends Activity {
             }
             long nowMs = System.currentTimeMillis();
             p.edit()
-                    .putLong("armed_until", nowMs + 5 * 60 * 1000L)
+                    .putLong("armed_until", nowMs + 6 * 60 * 1000L)
                     .putString("run_id", String.valueOf(nowMs))
                     .putString("crawl", "")
                     .putString("snaps", "[]")
