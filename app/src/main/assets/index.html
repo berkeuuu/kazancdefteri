@@ -130,6 +130,26 @@ h1 { margin: 0; font: 700 38px/1 var(--f-display); letter-spacing: 0.005em; text
 .tiernote { margin: 10px 0 0; font-size: 16px; }
 .tiernote strong { font-weight: 600; }
 
+/* Hedef */
+.steps8 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.chip { border: 1px solid var(--line); border-radius: 10px; padding: 6px 4px; text-align: center; font: 700 17px var(--f-display); background: var(--field); font-variant-numeric: tabular-nums; }
+.chip small { display: block; font: 500 11px var(--f-body); color: var(--muted); }
+.chip.pj { background: var(--accent-soft); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--hero-ink); }
+.chip.on small { color: var(--hero-ink); }
+.chip.goal { outline: 2.5px solid var(--ink); outline-offset: 1px; }
+.rail .gmark { position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1px; background: var(--ink); }
+.goalbox { margin: 12px 0 0; padding: 12px; border-radius: 10px; background: var(--accent-soft); font-size: 16px; line-height: 1.4; }
+.goalbox strong { font-weight: 700; }
+.linkbtn { margin-top: 8px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; color: var(--ink); font: 600 16px var(--f-body); cursor: pointer; }
+#goal-modal { position: fixed; inset: 0; z-index: 9000; background: var(--bg); overflow-y: auto; padding: 20px 16px 28px; }
+#goal-modal[hidden] { display: none; }
+#goal-modal h2 { font: 700 30px var(--f-display); margin: 8px 0 6px; }
+#goal-modal p { color: var(--muted); margin: 0 0 14px; line-height: 1.4; }
+#goal-modal .opt { display: flex; justify-content: space-between; align-items: baseline; width: 100%; min-height: 58px; margin-bottom: 8px; padding: 0 16px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: 700 24px var(--f-display); cursor: pointer; }
+#goal-modal .opt small { font: 500 14px var(--f-body); color: var(--muted); }
+#goal-modal .opt.skip { font: 600 16px var(--f-body); color: var(--muted); justify-content: center; }
+
 /* Form */
 form { display: flex; flex-direction: column; gap: 12px; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -385,11 +405,12 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     return { days: list.length, packages: packages, hours: hours, fixed: fixed, daily: daily, bonus: bonus, km: km, k1: k1, k2: k2, total: fixed + daily + bonus + km };
   }
   function synth(n, pk, h) { var a = []; for (var i = 0; i < n; i++) a.push({ pk: pk, h: h, k1: 0, k2: 0 }); return a; }
-  function project(list, target) {
+  function project(list, target, maxRem) {
     var n = list.length;
     if (!n) return null;
     var s = summarize(list);
     var rem = Math.max(0, target - n);
+    if (typeof maxRem === 'number') rem = Math.min(rem, Math.max(0, maxRem));
     var avgPk = s.packages / n, avgH = s.hours / n, pk = Math.round(avgPk);
     var all = list.slice();
     for (var i = 0; i < rem; i++) all.push({ pk: pk, h: avgH, k1: 0, k2: 0 });
@@ -416,7 +437,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   var today = new Date();
   var todayKey = dkey(today);
   var curMonth = todayKey.slice(0, 7);
-  var state = { days: {}, target: 26, month: curMonth, tab: null, tabTouched: false };
+  var state = { days: {}, goals: {}, target: 26, month: curMonth, tab: null, tabTouched: false };
   var plan = { pk: 38, h: 12 };
   var col = null;
   var busy = false;
@@ -424,10 +445,11 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   /* Tarayıcıda yedek saklama */
   var LS_KEY = 'kazanc-defteri-v1';
   function lsRead() { try { var r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
-  function lsWrite() { try { localStorage.setItem(LS_KEY, JSON.stringify({ days: state.days, target: state.target, plan: plan })); } catch (e) { /* saklama yoksa sayfa yine çalışır */ } }
+  function lsWrite() { try { localStorage.setItem(LS_KEY, JSON.stringify({ days: state.days, goals: state.goals, target: state.target, plan: plan })); } catch (e) { /* saklama yoksa sayfa yine çalışır */ } }
   var saved = lsRead();
   if (saved) {
     if (saved.days) { for (var sk in saved.days) { if (KEY_RE.test(sk)) state.days[sk] = clean(saved.days[sk]); } }
+    if (saved.goals) { for (var gk in saved.goals) { if (/^\d{4}-\d{2}$/.test(gk)) state.goals[gk] = clampInt(saved.goals[gk], 0, 5000); } }
     if (saved.target) state.target = clampInt(saved.target, 1, 31);
     if (saved.plan) { plan.pk = clampInt(saved.plan.pk, 0, 300); plan.h = clampNum(saved.plan.h, 0, 24); }
   }
@@ -448,6 +470,31 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     return Object.keys(state.days).filter(function (k) { return k.indexOf(prefix) === 0; }).sort().map(function (k) {
       var e = state.days[k]; return { k: k, pk: e.pk, h: e.h, k1: e.k1, k2: e.k2 };
     });
+  }
+  /* Ayın kalan takvim günü (bugün kayıtlı değilse bugün de sayılır) */
+  function daysLeftCal() {
+    var dim = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    var left = dim - today.getDate();
+    if (!state.days[todayKey]) left += 1;
+    return left;
+  }
+  function remDays(n) { return Math.max(0, Math.min(state.target - n, daysLeftCal())); }
+  function goalOf(m) { var g = state.goals[m]; return g > 0 ? g : 0; }
+  /* Hedefe göre: kalan günlerde günde en az kaç paket? */
+  function goalAdvice(list, goal) {
+    var s = summarize(list), n = list.length;
+    var rem = remDays(n), left = goal - s.packages;
+    var gb = lookup(RATES.monthly, goal);
+    var avg = n ? s.packages / n : 0;
+    var t = '<strong>Hedefin: ' + num(goal) + ' paket</strong> (' + tl(gb) + ' bonus). ';
+    if (left <= 0) return t + '🎯 Hedefe ulaştın, bonusun tamam!';
+    if (rem <= 0) return t + 'Çalışma günü kalmadı, ' + num(left) + ' paket eksik kaldı.';
+    var need = Math.ceil(left / rem);
+    t += 'Kalan <strong>' + rem + ' günde</strong> günde en az <strong>' + need + ' paket</strong> atmalısın (' + num(left) + ' paket kaldı).';
+    if (need > 90) t += ' Bu çok zor görünüyor, hedefi düşürmeyi düşünebilirsin.';
+    else if (n && need > Math.ceil(avg)) t += ' Şu anki hızın günde ' + nf1.format(avg) + ' paket, <strong>gazı aç! 🔥</strong>';
+    else if (n) t += ' Hızın günde ' + nf1.format(avg) + ' paket, böyle devam, yolundasın 👍';
+    return t;
   }
   function bandLabel(t, n) {
     var i = tierIndex(t, n);
@@ -474,10 +521,10 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     } else {
       h += '<p class="hs">' + s.days + ' gün · ' + num(s.packages) + ' paket · ' + nf1.format(s.hours) + ' saat</p>';
     }
-    var pr = (isCur && list.length) ? project(list, state.target) : null;
+    var pr = (isCur && list.length) ? project(list, state.target, daysLeftCal()) : null;
     if (pr && pr.rem > 0) {
       h += '<div class="proj"><span>Ay sonu tahmini</span><strong>' + tl(pr.sum.total) + '</strong></div>';
-      h += '<p class="hs">Ayda ' + state.target + ' gün, günde ort. ' + nf1.format(pr.avg) + ' paket · ' + num(pr.sum.packages) + ' paket, bonus ' + tl(pr.sum.bonus) + '</p>';
+      h += '<p class="hs">Bu hızla (günde ort. ' + nf1.format(pr.avg) + ' paket, ayda ' + state.target + ' gün) gidersen ay sonunda yaklaşık ' + num(pr.sum.packages) + ' paket atar, ' + tl(pr.sum.bonus) + ' bonus alırsın.</p>';
     }
     el.heroBody.innerHTML = h;
 
@@ -493,28 +540,40 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     var MAX = 1800;
     var pc = Math.min(100, s.packages / MAX * 100);
     var ppc = pr ? Math.min(100, pr.sum.packages / MAX * 100) : 0;
+    var goal = isCur ? goalOf(state.month) : 0;
     var lad = '<div class="rail" role="img" aria-label="' + num(s.packages) + ' paket, 1800 paketlik bonus merdiveninde">';
     if (pr && pr.rem > 0) lad += '<div class="proj-fill" style="width:' + ppc + '%"></div>';
     lad += '<div class="fill" style="width:' + pc + '%"></div>';
     RATES.monthly.forEach(function (t) { lad += '<i class="tick" style="left:' + (t[0] / MAX * 100) + '%"></i>'; });
-    lad += '<div class="flag"></div></div><div class="marks">';
-    [700, 1000, 1400].forEach(function (m) { lad += '<span style="left:' + (m / MAX * 100) + '%">' + m + '</span>'; });
-    lad += '<span class="end" style="left:100%">1800</span></div>';
+    if (goal) lad += '<i class="gmark" style="left:' + Math.min(100, goal / MAX * 100) + '%"></i>';
+    lad += '<div class="flag"></div></div><div class="steps8">';
+    RATES.monthly.forEach(function (t) {
+      var c = 'chip' + (s.packages >= t[0] ? ' on' : (pr && pr.rem > 0 && pr.sum.packages >= t[0] ? ' pj' : '')) + (goal === t[0] ? ' goal' : '');
+      lad += '<div class="' + c + '">' + t[0] + '<small>' + tl(t[1]) + '</small></div>';
+    });
+    lad += '</div>';
     if (pr && pr.rem > 0) lad += '<p class="legend"><span><i class="l1"></i>şu an</span><span><i class="l2"></i>ay sonu tahmini</span></p>';
     var nx = nextTier(RATES.monthly, s.packages);
     var note;
     if (nx) {
       note = (s.bonus ? 'Şu an ' + tl(s.bonus) + ' bonus. ' : 'Bonus henüz başlamadı. ') +
-        'Sıradaki basamak: <strong>' + num(nx.min) + ' paket → ' + tl(nx.val) + '</strong>' + (s.bonus ? ' (+' + tl(nx.val - s.bonus) + ')' : '') +
+        'Sıradaki basamak: <strong>' + num(nx.min) + ' paket → ' + tl(nx.val) + '</strong>' + (s.bonus ? ' (şimdikinden ' + tl(nx.val - s.bonus) + ' fazla)' : '') +
         '. ' + num(nx.min - s.packages) + ' paket kaldı.';
       if (isCur && list.length) {
-        var rem = Math.max(0, state.target - list.length);
-        if (rem > 0) note += ' Kalan ' + rem + ' günde günde en az ' + Math.ceil((nx.min - s.packages) / rem) + ' paket.';
+        var rem = remDays(list.length);
+        if (rem > 0) note += ' Kalan ' + rem + ' günde günde en az ' + Math.ceil((nx.min - s.packages) / rem) + ' paket atarsan bu basamağa geçersin.';
       }
     } else {
       note = 'En üst basamaktasın: <strong>' + tl(s.bonus) + '</strong> bonus.';
     }
     lad += '<p class="tiernote">' + note + '</p>';
+    if (isCur) {
+      if (goal) {
+        lad += '<p class="goalbox">' + goalAdvice(list, goal) + '</p><button type="button" class="linkbtn" data-goal="pick">Hedefi değiştir</button>';
+      } else {
+        lad += '<button type="button" class="linkbtn" data-goal="pick">🎯 Bu ay için hedef seç</button>';
+      }
+    }
     el.ladder.innerHTML = lad;
 
     /* Kayıt listesi */
@@ -624,9 +683,15 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     var nx = nextTier(RATES.daily, plan.pk);
     if (nx) {
       var alt = summarize(synth(state.target, nx.min, plan.h));
-      h += '<p class="tiernote">Günde <strong>' + nx.min + ' paket</strong> atarsan ayda <strong>' + tl(alt.total) + '</strong> (+' + tl(alt.total - s.total) + ').</p>';
+      h += '<p class="tiernote">Bir üst günlük basamak: günde <strong>' + nx.min + ' paket</strong> atarsan ayda <strong>' + tl(alt.total) + '</strong> kazanırsın. Bu, şu an hesapladığın ' + tl(s.total) + ' kazançtan <strong>' + tl(alt.total - s.total) + ' fazla</strong>.</p>';
     } else {
       h += '<p class="tiernote">En üst günlük basamaktasın.</p>';
+    }
+    var pg = goalOf(curMonth);
+    if (pg) {
+      var need = Math.ceil(pg / state.target);
+      h += '<p class="goalbox"><strong>Hedefin: ' + num(pg) + ' paket.</strong> Ayda ' + state.target + ' gün çalışırsan günde en az <strong>' + need + ' paket</strong> atmalısın. ' +
+        (plan.pk >= need ? 'Seçtiğin ' + plan.pk + ' paketle hedefi tutturursun ✅' : 'Seçtiğin ' + plan.pk + ' paketle ' + num(s.packages) + ' paket olur, hedefe ' + num(pg - s.packages) + ' paket eksik kalır.') + '</p>';
     }
     el.planResult.innerHTML = h;
 
@@ -688,11 +753,40 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
 
   function renderAll() { renderMonth(); renderPlan(); syncPlanInputs(); setStoreNote(); }
 
+  /* ---- Aylık hedef seçimi ---- */
+  var gm = document.createElement('div');
+  gm.id = 'goal-modal';
+  gm.hidden = true;
+  document.body.appendChild(gm);
+  function openGoal() {
+    var h = '<h2>Bu ayın hedefi ne?</h2><p>Ay sonunda hangi bonus basamağını istiyorsun? Kalan günlerde günde kaç paket atman gerektiğini buna göre hesaplayıp sürekli güncelleyeceğim. Sonradan Bu ay sekmesinden değiştirebilirsin.</p>';
+    RATES.monthly.forEach(function (t) {
+      h += '<button type="button" class="opt" data-g="' + t[0] + '"><span>' + num(t[0]) + ' paket</span><small>' + tl(t[1]) + ' bonus</small></button>';
+    });
+    h += '<button type="button" class="opt skip" data-g="0">Bu ay hedef koymayacağım</button>';
+    gm.innerHTML = h;
+    gm.hidden = false;
+    gm.scrollTop = 0;
+  }
+  gm.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-g]') : null;
+    if (!b) return;
+    state.goals[curMonth] = clampInt(b.getAttribute('data-g'), 0, 5000);
+    lsWrite();
+    gm.hidden = true;
+    renderMonth(); renderPlan();
+  });
+  el.ladder.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-goal]') : null;
+    if (b) openGoal();
+  });
+
   /* ---- İlk çizim ---- */
   el.date.value = todayKey;
   syncFormFromDate();
   renderAll();
   setTab(Object.keys(state.days).length ? 'month' : 'plan', false);
+  if (state.goals[curMonth] === undefined) openGoal();
 
   /* ---- Migpack'ten okuma (sadece Android uygulamasında) ---- */
   var A = window.Android || null;
@@ -939,6 +1033,97 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   });
   tabRead.addEventListener('click', function () { updateReadStatus(); refreshDump(); });
   window.onAppResume = function () { updateReadStatus(); refreshDump(); };
+
+  /* ---- Kurulum kapısı: gerekli ayarlar tamam değilse sadece bu sayfa görünür ---- */
+  (function () {
+    if (!A) return;
+    var css = document.createElement('style');
+    css.textContent =
+      '#gate{position:fixed;inset:0;z-index:9999;background:var(--bg);color:var(--ink);overflow-y:auto;padding:20px 16px 28px;font-family:var(--f-body)}' +
+      '#gate[hidden]{display:none}' +
+      '#gate h1{font:700 30px var(--f-display);margin:8px 0 6px}' +
+      '#gate .gi{color:var(--muted);margin:0 0 16px;line-height:1.4}' +
+      '.gs{display:flex;gap:12px;background:var(--surface);border:1.5px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}' +
+      '.gs.ok{border-color:#2E9E5B}' +
+      '.gc{flex:0 0 34px;height:34px;border-radius:50%;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--muted)}' +
+      '.gs.ok .gc{background:#2E9E5B;border-color:#2E9E5B;color:#fff}' +
+      '.gb{flex:1;min-width:0}.gb b{display:block;font-size:17px;margin-bottom:3px}' +
+      '.gb p{margin:0 0 10px;color:var(--muted);font-size:14px;line-height:1.4}' +
+      '.gb .btn{min-height:46px;font-size:17px;margin:0 8px 6px 0}' +
+      '.gwarn{color:var(--danger);font-weight:600}' +
+      '.credit{text-align:center;font-size:11px;color:var(--muted);opacity:.6;margin:24px 0 8px;letter-spacing:.04em}';
+    document.head.appendChild(css);
+
+    var gate = document.createElement('div');
+    gate.id = 'gate';
+    gate.hidden = true;
+    gate.innerHTML =
+      '<h1>Kurulum</h1>' +
+      '<p class="gi">Uygulamanın düzgün çalışması için bu ayarları bir kere yapman gerekiyor. Hepsi tamam olunca bu sayfa kapanır. Sonradan bir ayar bozulursa tekrar görünür.</p>' +
+      '<div class="gs" id="g1"><div class="gc">1</div><div class="gb"><b>Okuma izni (Erişilebilirlik)</b>' +
+      '<p id="g1t"></p><button type="button" class="btn primary" id="g1b">Ayarları aç</button>' +
+      '<button type="button" class="btn" id="g1c">Uygulama bilgisi</button></div></div>' +
+      '<div class="gs" id="g2"><div class="gc">2</div><div class="gb"><b>Pil kısıtlaması yok</b>' +
+      '<p>Telefon uygulamayı arka planda uyutmasın. Çıkan pencerede İzin ver / Evet\'e bas.</p>' +
+      '<button type="button" class="btn primary" id="g2b">İzin ver</button></div></div>' +
+      '<div class="gs" id="g3"><div class="gc">3</div><div class="gb"><b>Arka planda çalışma / otomatik başlatma</b>' +
+      '<p>Açılan sayfada Kazanç Defteri için "Otomatik başlat"ı aç ve pil ayarını "Kısıtlama yok" yap. Bulamazsan Uygulama bilgisi > Pil bölümüne bak. İşin bitince "Yaptım"a bas.</p>' +
+      '<button type="button" class="btn primary" id="g3b">Ayarları aç</button>' +
+      '<button type="button" class="btn" id="g3c">Yaptım</button></div></div>' +
+      '<p class="credit">designer by berkeuuu</p>';
+    document.body.appendChild(gate);
+
+    var cr = document.createElement('p');
+    cr.className = 'credit';
+    cr.textContent = 'designer by berkeuuu';
+    document.body.appendChild(cr);
+
+    function st() {
+      var s = { acc: false, alive: false, bat: true, bg: false };
+      try { s.acc = A.serviceEnabled(); } catch (e) { s.acc = false; }
+      try { s.alive = A.serviceAlive(); } catch (e) { s.alive = s.acc; }
+      try { s.bat = A.batteryOk(); } catch (e) { s.bat = true; }
+      try { s.bg = A.bgConfirmed(); } catch (e) { s.bg = true; }
+      return s;
+    }
+    function mark(id, ok) { var el = $(id); el.className = 'gs' + (ok ? ' ok' : ''); el.firstChild.textContent = ok ? '✓' : el.firstChild.textContent; }
+    function check() {
+      var s = st();
+      var ok1 = s.acc && s.alive;
+      var t1 = $('g1t');
+      if (!s.acc) {
+        t1.textContent = 'Ayarlar > Erişilebilirlik > Kazanç Defteri\'ni bul ve aç. İzin gri ise "Uygulama bilgisi"ne gir, sağ üstteki ⋮ menüsünden "Kısıtlanmış ayarlara izin ver"i seç, sonra tekrar dene.';
+        t1.className = '';
+      } else if (!s.alive) {
+        t1.textContent = 'İzin açık görünüyor ama servis uyumuş. Ayarlarda izni bir kere kapatıp tekrar aç. Bu bir kereliğe mahsus.';
+        t1.className = 'gwarn';
+      } else {
+        t1.textContent = 'Tamam, okuma izni çalışıyor.';
+        t1.className = '';
+      }
+      var g1 = $('g1'), g2 = $('g2'), g3 = $('g3');
+      g1.className = 'gs' + (ok1 ? ' ok' : ''); g1.firstChild.textContent = ok1 ? '✓' : '1';
+      g2.className = 'gs' + (s.bat ? ' ok' : ''); g2.firstChild.textContent = s.bat ? '✓' : '2';
+      g3.className = 'gs' + (s.bg ? ' ok' : ''); g3.firstChild.textContent = s.bg ? '✓' : '3';
+      var all = ok1 && s.bat && s.bg;
+      gate.hidden = all;
+      document.body.style.overflow = all ? '' : 'hidden';
+    }
+    $('g1b').addEventListener('click', function () { A.openAccessibilitySettings(); });
+    $('g1c').addEventListener('click', function () { A.openAppSettings(); });
+    $('g2b').addEventListener('click', function () { A.requestBattery(); });
+    $('g3b').addEventListener('click', function () { A.openAutostart(); });
+    $('g3c').addEventListener('click', function () { A.setBgConfirmed(true); check(); });
+
+    var prevResume = window.onAppResume;
+    window.onAppResume = function () {
+      if (dkey(new Date()) !== todayKey) { location.reload(); return; }
+      check();
+      if (prevResume) prevResume();
+    };
+    setInterval(check, 1500);
+    check();
+  })();
   updateReadStatus();
   refreshDump();
 
