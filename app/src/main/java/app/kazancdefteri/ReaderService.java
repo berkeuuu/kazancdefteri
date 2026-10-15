@@ -106,6 +106,9 @@ public class ReaderService extends AccessibilityService {
     private boolean finished = false;
     private boolean announced = false;
     private boolean overlayDone = false;
+    private boolean clicked = false;
+    private int clickTick = 0;
+    private int tail = 0;
     private String lastSig = "";
     private long runStart = 0L;
 
@@ -324,6 +327,9 @@ public class ReaderService extends AccessibilityService {
             finished = false;
             announced = false;
             overlayDone = false;
+            clicked = false;
+            clickTick = 0;
+            tail = 0;
             lastSig = "";
             runStart = now;
         }
@@ -361,6 +367,12 @@ public class ReaderService extends AccessibilityService {
         if (headers.isEmpty()) {
             setOverlay(false, "Okuma için hazır",
                     "Migpack'te Geçmiş Siparişlerim > Günlük sekmesini aç. Günler görünce okuma başlayacak.");
+            return;
+        }
+        boolean todayMode = "today".equals(p.getString("mode", "all"));
+        if (todayMode) {
+            setOverlay(false, "Bugün okunuyor, lütfen bekleyin", "Telefona dokunma.");
+            handleToday(p, root, headers, items, now);
             return;
         }
         setOverlay(false, "Okuma yapılıyor, lütfen bekleyin",
@@ -415,11 +427,67 @@ public class ReaderService extends AccessibilityService {
         finish(p);
     }
 
+    /** Sadece bugünün gün kartını bulur, açar, içeriğini görünür hale getirir ve bitirir. */
+    private void handleToday(SharedPreferences p, AccessibilityNodeInfo root, ArrayList<Item> headers,
+                             ArrayList<Item> items, long now) {
+        if (actions >= MAX_ACTIONS || now - runStart > 90 * 1000L) {
+            finish(p);
+            return;
+        }
+        Pattern pat = Pattern.compile(p.getString("today_pat", "^$"),
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Item th = null;
+        int idx = -1;
+        for (int i = 0; i < headers.size(); i++) {
+            if (pat.matcher(headers.get(i).text).matches()) {
+                th = headers.get(i);
+                idx = i;
+                break;
+            }
+        }
+        if (th == null) {
+            if (scrollForward(root)) {
+                actions++;
+                return;
+            }
+            finish(p);
+            return;
+        }
+        int limit = (idx + 1 < headers.size()) ? headers.get(idx + 1).top : Integer.MAX_VALUE;
+        boolean expanded = false;
+        for (Item it : items) {
+            if (it.top > th.top && it.top < limit && it.text.startsWith("Paketler")) {
+                expanded = true;
+                break;
+            }
+        }
+        if (!expanded) {
+            if (!clicked || actions - clickTick >= 3) {
+                click(th.node);
+                clicked = true;
+                clickTick = actions;
+            }
+            actions++;
+            return;
+        }
+        if (tail < 3 && scrollForward(root)) {
+            tail++;
+            actions++;
+            return;
+        }
+        finish(p);
+    }
+
     private void finish(SharedPreferences p) {
         finished = true;
         p.edit().putString("crawl", "done").putLong("armed_until", 0L).apply();
-        setOverlay(true, "Okuma tamamlandı",
-                done.size() + " gün okundu. Tamam'a basınca veriler Kazanç Defteri'ne aktarılacak.");
+        if ("today".equals(p.getString("mode", "all"))) {
+            setOverlay(true, "Okuma tamamlandı",
+                    "Bugünün verisi okundu. Tamam'a basınca Kazanç Defteri'ne aktarılacak.");
+        } else {
+            setOverlay(true, "Okuma tamamlandı",
+                    done.size() + " gün okundu. Tamam'a basınca veriler Kazanç Defteri'ne aktarılacak.");
+        }
     }
 
     private void click(AccessibilityNodeInfo n) {

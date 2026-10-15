@@ -92,6 +92,46 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    private String beginRead(boolean todayOnly) {
+        if (!serviceOn()) {
+            return "no_service";
+        }
+        SharedPreferences p = prefs();
+        String pkg = p.getString("mig_pkg", null);
+        if (pkg == null || getPackageManager().getLaunchIntentForPackage(pkg) == null) {
+            pkg = findMigpack();
+            if (pkg == null) {
+                return "no_migpack";
+            }
+            p.edit().putString("mig_pkg", pkg).apply();
+        }
+        final Intent launch = getPackageManager().getLaunchIntentForPackage(pkg);
+        if (launch == null) {
+            return "no_migpack";
+        }
+        String[] months = {"Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
+                "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"};
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        String pat = "^0?" + cal.get(java.util.Calendar.DAY_OF_MONTH) + "\\s+"
+                + months[cal.get(java.util.Calendar.MONTH)] + "(\\s.*)?$";
+        long nowMs = System.currentTimeMillis();
+        p.edit()
+                .putLong("armed_until", nowMs + 6 * 60 * 1000L)
+                .putString("run_id", String.valueOf(nowMs))
+                .putString("mode", todayOnly ? "today" : "all")
+                .putString("today_pat", pat)
+                .putString("crawl", "")
+                .putString("snaps", "[]")
+                .apply();
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                startActivity(launch);
+            }
+        });
+        return "ok";
+    }
+
     public class Bridge {
 
         @JavascriptInterface
@@ -245,36 +285,13 @@ public class MainActivity extends Activity {
         /** Okumayı başlatır ve Migpack'i açar. Dönüş: ok, no_service, no_migpack */
         @JavascriptInterface
         public String startRead() {
-            if (!serviceOn()) {
-                return "no_service";
-            }
-            SharedPreferences p = prefs();
-            String pkg = p.getString("mig_pkg", null);
-            if (pkg == null || getPackageManager().getLaunchIntentForPackage(pkg) == null) {
-                pkg = findMigpack();
-                if (pkg == null) {
-                    return "no_migpack";
-                }
-                p.edit().putString("mig_pkg", pkg).apply();
-            }
-            final Intent launch = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (launch == null) {
-                return "no_migpack";
-            }
-            long nowMs = System.currentTimeMillis();
-            p.edit()
-                    .putLong("armed_until", nowMs + 6 * 60 * 1000L)
-                    .putString("run_id", String.valueOf(nowMs))
-                    .putString("crawl", "")
-                    .putString("snaps", "[]")
-                    .apply();
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    startActivity(launch);
-                }
-            });
-            return "ok";
+            return beginRead(false);
+        }
+
+        /** Sadece bugünün kartını okur. */
+        @JavascriptInterface
+        public String startReadToday() {
+            return beginRead(true);
         }
 
         /** Telefondaki uygulamaları listeler (Migpack adıyla bulunamazsa elle seçmek için). */
