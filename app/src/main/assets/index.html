@@ -141,6 +141,7 @@ h1 { margin: 0; font: 700 38px/1 var(--f-display); letter-spacing: 0.005em; text
 .rail .gmark { position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1px; background: var(--ink); }
 .goalbox { margin: 12px 0 0; padding: 12px; border-radius: 10px; background: var(--accent-soft); font-size: 16px; line-height: 1.4; }
 .goalbox strong { font-weight: 700; }
+.todaybox { margin-top: 10px; background: var(--field); border: 1px solid var(--line); }
 .linkbtn { margin-top: 8px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; color: var(--ink); font: 600 16px var(--f-body); cursor: pointer; }
 #goal-modal { position: fixed; inset: 0; z-index: 9000; background: var(--bg); overflow-y: auto; padding: 20px 16px 28px; }
 #goal-modal[hidden] { display: none; }
@@ -363,14 +364,15 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
         <h3>Migpack'ten otomatik oku</h3>
         <ol class="steps">
           <li>Okuma iznini aç (bir kere).</li>
-          <li>"Migpack'ten oku" düğmesine bas. Migpack açılır.</li>
+          <li>"Sadece bugünü oku" (günlük kullanım) ya da "Tüm ayı oku" düğmesine bas. Migpack açılır.</li>
           <li>Geçmiş Siparişlerim > Günlük ekranını aç, ayı seç. Gün kartlarını uygulama kendisi açıp kaydırır.</li>
           <li>"Okuma bitti" yazısını görünce uygulamaya dön ve günleri kontrol et. Aylık sekmesine de bir kere dokunursan ay toplamıyla karşılaştırırım.</li>
         </ol>
         <p class="msg" id="r-status" role="status"></p>
         <div class="actions">
           <button type="button" class="btn" id="r-perm">Okuma iznini aç</button>
-          <button type="button" class="btn primary" id="r-go">Migpack'ten oku</button>
+          <button type="button" class="btn" id="r-go">Tüm ayı oku</button>
+          <button type="button" class="btn primary" id="r-today">Sadece bugünü oku</button>
         </div>
         <p class="msg" id="r-msg" role="status" aria-live="polite"></p>
         <details>
@@ -510,7 +512,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   function daysLeftCal() {
     var dim = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     var left = dim - today.getDate();
-    if (!state.days[todayKey]) left += 1;
+    if (!dayOver()) left += 1;
     return left;
   }
   /* Takvim: ayın haftaları (Pzt-Paz), ay sınırına kırpılmış */
@@ -539,7 +541,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   }
   function plannedWork(ym) { return countWork(ym, null); }
   function workLeft() {
-    var t = new Date(today.getFullYear(), today.getMonth(), today.getDate() + (state.days[todayKey] ? 1 : 0));
+    var t = new Date(today.getFullYear(), today.getMonth(), today.getDate() + (dayOver() ? 1 : 0));
     if (dkey(t).slice(0, 7) !== curMonth) return 0;
     return countWork(curMonth, dkey(t));
   }
@@ -548,20 +550,75 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     return workLeft();
   }
   function goalOf(m) { var g = state.goals[m]; return g > 0 ? g : 0; }
-  /* Hedefe göre: kalan günlerde günde en az kaç paket? */
+  /* Vardiya en geç 23:00'e kadar sürer; o saate kadar bugünün kaydı "devam ediyor" sayılır */
+  function dayOver() { return new Date().getHours() >= 23; }
+  function splitLive(list) {
+    var live = null, done = list;
+    if (state.month === curMonth && !dayOver()) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].k === todayKey) { live = list[i]; done = list.filter(function (e) { return e.k !== todayKey; }); break; }
+      }
+    }
+    return { live: live, done: done };
+  }
+  /* Hedef için günde en az kaç paket (bugün devam ediyorsa tamamlanan günlere göre) */
+  function needPerDay(sp, goal) {
+    var rem = remDays(sp.done.length);
+    var left = goal - summarize(sp.done).packages;
+    return rem > 0 && left > 0 ? Math.max(1, Math.ceil(left / rem)) : 0;
+  }
+  /* Bugünü k paketle kapatırsan: ortalama ve ay sonu tahmini */
+  function closeToday(sp, k, hEnd) {
+    var avgH = sp.done.length ? summarize(sp.done).hours / sp.done.length : 12;
+    var all = sp.done.concat([{ pk: k, h: hEnd || Math.max(sp.live.h, avgH), k1: sp.live.k1 || 0, k2: sp.live.k2 || 0 }]);
+    var pr2 = project(all, state.target, Math.max(0, remDays(sp.done.length) - 1));
+    return { avg: summarize(all).packages / all.length, sum: pr2.sum };
+  }
+  function todayBox(sp, goal, pr) {
+    var live = sp.live, h = '<strong>Bugün (devam ediyor):</strong> şu an ' + live.pk + ' paket, günlük prim ' + tl(lookup(RATES.daily, live.pk)) + '.';
+    var base0 = sp.done.length ? summarize(sp.done).packages / sp.done.length : 0;
+    var rate = live.h >= 1 ? live.pk / live.h : 0;
+    if (rate > 0) {
+      h += '<br>Saatlik hızın: <strong>' + nf1.format(rate) + ' paket/saat</strong> (' + nf1.format(live.h) + ' saatte ' + live.pk + ' paket).';
+      [[10.5, 'Mola yaparsan (toplam 10,5 saat çalışırsan)'], [12, 'Mola yapmazsan (12 saat çalışırsan)']].forEach(function (x) {
+        var k = Math.max(live.pk, Math.round(rate * x[0]));
+        var c = closeToday(sp, k, Math.max(x[0], live.h));
+        h += '<br>• ' + x[1] + ' bu hızla bugünü yaklaşık <strong>' + k + ' paketle</strong> kapatırsın (günlük prim ' + tl(lookup(RATES.daily, k)) + '). Günlük ortalaman ' + nf1.format(base0) + ' → <strong>' + nf1.format(c.avg) + '</strong> olur, ay sonu tahmini ' + tl(c.sum.total) + ' (' + num(c.sum.packages) + ' paket).';
+      });
+    } else {
+      h += '<br>Saatlik hızı hesaplamak için en az 1 saatlik çalışma gerekir.';
+    }
+    var ks = [], labels = {};
+    var need = goal ? needPerDay(sp, goal) : 0;
+    if (need > live.pk && need <= 150) { ks.push(need); labels[need] = ' (hedefin için gereken)'; }
+    var nx = nextTier(RATES.daily, live.pk);
+    if (!ks.length && nx) { ks.push(nx.min); labels[nx.min] = ' (bir üst prim basamağı, ' + tl(nx.val) + ')'; }
+    ks.sort(function (a, b) { return a - b; });
+    ks.forEach(function (k) {
+      var c = closeToday(sp, k);
+      var d = pr ? c.sum.total - pr.sum.total : 0;
+      h += '<br>• Bugünü <strong>' + k + ' paketle</strong> kapatırsan' + labels[k] + ' günlük ortalaman ' + nf1.format(base0) + ' → <strong>' + nf1.format(c.avg) + '</strong> olur, ay sonu tahmini ' + tl(c.sum.total) + (pr && Math.abs(d) >= 1 ? ' (ortalama hıza göre ' + (d >= 0 ? '+' : '−') + tl(Math.abs(d)) + ')' : '') + '.';
+    });
+    if (!ks.length) h += '<br>Bugünkü en yüksek basamaktasın' + (need && live.pk >= need ? ' ve hedefin için gereken paketi tamamladın ✅' : '') + '.';
+    return h;
+  }
+  /* Hedefe göre: kalan günlerde günde en az kaç paket? Bugün bitmediyse ortalamaya ve gün sayısına katılmaz. */
   function goalAdvice(list, goal) {
-    var s = summarize(list), n = list.length;
-    var rem = remDays(n), left = goal - s.packages;
+    var sp = splitLive(list), done = sp.done, live = sp.live;
+    var sAll = summarize(list), sDone = summarize(done), n = done.length;
+    var rem = remDays(n);
+    var leftAll = goal - sAll.packages, leftDone = goal - sDone.packages;
     var gb = lookup(RATES.monthly, goal);
-    var avg = n ? s.packages / n : 0;
+    var avg = n ? sDone.packages / n : 0;
     var t = '<strong>Hedefin: ' + num(goal) + ' paket</strong> (' + tl(gb) + ' bonus). ';
-    if (left <= 0) return t + '🎯 Hedefe ulaştın, bonusun tamam!';
-    if (rem <= 0) return t + 'Çalışma günü kalmadı, ' + num(left) + ' paket eksik kaldı.';
-    var need = Math.ceil(left / rem);
-    t += 'Kalan <strong>' + rem + ' günde</strong> günde en az <strong>' + need + ' paket</strong> atmalısın (' + num(left) + ' paket kaldı).';
+    if (leftAll <= 0) return t + '🎯 Hedefe ulaştın, bonusun tamam!';
+    if (rem <= 0) return t + 'Çalışma günü kalmadı, ' + num(leftAll) + ' paket eksik kaldı.';
+    var need = Math.max(1, Math.ceil(leftDone / rem));
+    t += 'Kalan <strong>' + rem + ' günde</strong>' + (live ? ' (bugün dahil)' : '') + ' günde en az <strong>' + need + ' paket</strong> atmalısın (' + num(leftAll) + ' paket kaldı).';
+    if (live) t += ' Bugün şu ana kadar ' + live.pk + ' paket attın' + (live.pk >= need ? ', bugünün hedefini tamamladın ✅.' : ', bugünün hedefine <strong>' + (need - live.pk) + ' paket</strong> kaldı.');
     if (need > 90) t += ' Bu çok zor görünüyor, hedefi düşürmeyi düşünebilirsin.';
-    else if (n && need > Math.ceil(avg)) t += ' Şu anki hızın günde ' + nf1.format(avg) + ' paket, <strong>gazı aç! 🔥</strong>';
-    else if (n) t += ' Hızın günde ' + nf1.format(avg) + ' paket, böyle devam, yolundasın 👍';
+    else if (n && need > Math.ceil(avg)) t += ' Tamamlanan günlerdeki hızın günde ' + nf1.format(avg) + ' paket, <strong>gazı aç! 🔥</strong>';
+    else if (n) t += ' Tamamlanan günlerdeki hızın günde ' + nf1.format(avg) + ' paket, böyle devam, yolundasın 👍';
     return t;
   }
   function bandLabel(t, n) {
@@ -579,6 +636,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     var list = monthList();
     var s = summarize(list);
     var isCur = state.month === curMonth;
+    var sp = isCur ? splitLive(list) : { live: null, done: list };
     el.heroMonth.textContent = monthLabel(state.month);
     el.next.disabled = state.month >= curMonth;
 
@@ -587,19 +645,29 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     if (!list.length) {
       h += '<p class="hs">Bu ay için kayıt yok. Aşağıdan günü ekle ya da Tahmin sekmesine bak.</p>';
     } else {
-      h += '<p class="hs">' + s.days + ' gün · ' + num(s.packages) + ' paket · ' + nf1.format(s.hours) + ' saat</p>';
+      h += '<p class="hs">' + (sp.live ? (s.days - 1) + ' gün + bugün (devam ediyor)' : s.days + ' gün') + ' · ' + num(s.packages) + ' paket · ' + nf1.format(s.hours) + ' saat</p>';
     }
-    var pr = (isCur && list.length) ? project(list, state.target, remDays(list.length)) : null;
+    var pr = (isCur && sp.done.length) ? project(sp.done, state.target, remDays(sp.done.length)) : null;
     if (pr && pr.rem > 0) {
       h += '<div class="proj"><span>Ay sonu tahmini</span><strong>' + tl(pr.sum.total) + '</strong></div>';
       h += '<p class="hs">Bu hızla (günde ort. ' + nf1.format(pr.avg) + ' paket, ayda ' + state.target + ' gün) gidersen ay sonunda yaklaşık ' + num(pr.sum.packages) + ' paket atar, ' + tl(pr.sum.bonus) + ' bonus alırsın.</p>';
+    }
+    if (sp.live && pr && pr.rem > 0) {
+      var gl = goalOf(state.month), nd = gl ? needPerDay(sp, gl) : 0;
+      var rt = sp.live.h >= 1 ? sp.live.pk / sp.live.h : 0;
+      if (rt > 0) h += '<p class="hs">Bugünkü hızın saatte ' + nf1.format(rt) + ' paket: 12 saatte yaklaşık ' + Math.max(sp.live.pk, Math.round(rt * 12)) + ' paketle kapatırsın.</p>';
+      if (nd > sp.live.pk && nd <= 150) {
+        h += '<p class="hs">Bugün devam ediyor: şu an ' + sp.live.pk + ' paket. Hedefin için bugünü <strong>' + nd + ' paketle</strong> kapatmalısın; kapatırsan ortalaman ' + nf1.format(closeToday(sp, nd).avg) + ' olur.</p>';
+      } else {
+        h += '<p class="hs">Bugün devam ediyor: şu an ' + sp.live.pk + ' paket. Bugün hesaba katılmadı, tahmin tamamlanan günlerin hızına göre.</p>';
+      }
     }
     el.heroBody.innerHTML = h;
 
     var band = bandLabel(RATES.monthly, s.packages);
     var rows = '';
     rows += row('Sabit ücret', nf1.format(s.hours) + ' saat × ₺177' + (s.hours * RATES.hourly >= RATES.fixedMonth ? ' · tam ay' : ''), tl(s.fixed));
-    rows += row('Günlük prim', s.days + ' gün', tl(s.daily));
+    rows += row('Günlük prim', sp.live ? (s.days - 1) + ' gün + bugün (devam ediyor)' : s.days + ' gün', tl(s.daily));
     rows += row('Aylık bonus', s.packages ? num(s.packages) + ' paket · ' + (band ? band + ' arası' : 'basamak yok') : 'henüz paket yok', tl(s.bonus));
     if (s.km) rows += row('KM desteği', s.k1 + ' × ₺25 + ' + s.k2 + ' × ₺35', tl(s.km));
     el.breakdown.innerHTML = rows;
@@ -628,8 +696,8 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
         'Sıradaki basamak: <strong>' + num(nx.min) + ' paket → ' + tl(nx.val) + '</strong>' + (s.bonus ? ' (şimdikinden ' + tl(nx.val - s.bonus) + ' fazla)' : '') +
         '. ' + num(nx.min - s.packages) + ' paket kaldı.';
       if (isCur && list.length) {
-        var rem = remDays(list.length);
-        if (rem > 0) note += ' Kalan ' + rem + ' günde günde en az ' + Math.ceil((nx.min - s.packages) / rem) + ' paket atarsan bu basamağa geçersin.';
+        var rem = remDays(sp.done.length);
+        if (rem > 0) note += ' Kalan ' + rem + ' günde' + (sp.live ? ' (bugün dahil)' : '') + ' günde en az ' + Math.max(1, Math.ceil((nx.min - summarize(sp.done).packages) / rem)) + ' paket atarsan bu basamağa geçersin.';
       }
     } else {
       note = 'En üst basamaktasın: <strong>' + tl(s.bonus) + '</strong> bonus.';
@@ -642,6 +710,8 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
         lad += '<button type="button" class="linkbtn" data-goal="pick">🎯 Bu ay için hedef seç</button>';
       }
     }
+    if (isCur && sp.live) lad += '<p class="goalbox todaybox">' + todayBox(sp, goal, pr) + '</p>';
+    if (isCur && window.Android) lad += '<button type="button" class="linkbtn" data-readtoday="1">🔄 Bugünü Migpack\'ten güncelle</button>';
     el.ladder.innerHTML = lad;
     renderOff();
 
@@ -653,7 +723,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
       list.slice().reverse().forEach(function (e) {
         var dt = parseKey(e.k).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', weekday: 'short' });
         var extra = (e.k1 || e.k2) ? ' · km ' + (e.k1 + e.k2) : '';
-        d += '<button type="button" class="day" data-k="' + e.k + '"><span class="d">' + dt + '</span><span class="m">' + e.pk + ' paket · ' + nf1.format(e.h) + ' sa' + extra + '</span><span class="v">' + tl(lookup(RATES.daily, e.pk)) + '</span></button>';
+        d += '<button type="button" class="day" data-k="' + e.k + '"><span class="d">' + dt + '</span><span class="m">' + e.pk + ' paket · ' + nf1.format(e.h) + ' sa' + extra + (isCur && e.k === todayKey && sp.live ? ' · bugün, devam ediyor' : '') + '</span><span class="v">' + tl(lookup(RATES.daily, e.pk)) + '</span></button>';
       });
       el.daylist.innerHTML = d;
     }
@@ -953,6 +1023,9 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     if (b) openGoal();
   });
 
+  var lastOver = dayOver();
+  setInterval(function () { if (dayOver() !== lastOver) { lastOver = dayOver(); renderAll(); } }, 60000);
+
   /* ---- İlk çizim ---- */
   el.date.value = todayKey;
   syncFormFromDate();
@@ -971,7 +1044,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     status: $('r-status'), perm: $('r-perm'), go: $('r-go'), msg: $('r-msg'),
     picker: $('r-picker'), apps: $('r-apps'), review: $('r-review'), list: $('r-list'),
     add: $('r-add'), raw: $('r-raw'), copy: $('r-copy'), clear: $('r-clear'),
-    off: $('r-off'), body: $('r-body'), appset: $('r-appset')
+    off: $('r-off'), body: $('r-body'), appset: $('r-appset'), today: $('r-today')
   };
   var rd = { snaps: [], cands: [], offs: [], month: null, shown: '', hd: 0 };
 
@@ -1146,12 +1219,12 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     }
   }
 
-  function startReading() {
+  function startReading(todayOnly) {
     var res = 'err';
-    try { res = A.startRead(); } catch (e) { res = 'err'; }
+    try { res = todayOnly ? A.startReadToday() : A.startRead(); } catch (e) { res = 'err'; }
     if (res === 'ok') {
       R.picker.hidden = true;
-      rmsg('Migpack açıldı. Geçmiş Siparişlerim > Günlük ekranını aç ve ayı seç. Okuma kendiliğinden başlar; "Okuma tamamlandı" çıkınca Tamam\'a bas.', false);
+      rmsg(todayOnly ? 'Migpack açıldı. Geçmiş Siparişlerim > Günlük ekranını aç. Bugünün kartı kendiliğinden açılıp okunur; "Okuma tamamlandı" çıkınca Tamam\'a bas.' : 'Migpack açıldı. Geçmiş Siparişlerim > Günlük ekranını aç ve ayı seç. Okuma kendiliğinden başlar; "Okuma tamamlandı" çıkınca Tamam\'a bas.', false);
     } else if (res === 'no_service') {
       rmsg('Önce okuma iznini aç.', true);
       updateReadStatus();
@@ -1174,14 +1247,19 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     R.picker.hidden = false;
   }
 
-  R.go.addEventListener('click', function () { if (A) startReading(); });
+  R.go.addEventListener('click', function () { if (A) startReading(false); });
+  R.today.addEventListener('click', function () { if (A) startReading(true); });
+  el.ladder.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-readtoday]') : null;
+    if (b && A) { setTab('read', true); startReading(true); }
+  });
   R.perm.addEventListener('click', function () { if (A) A.openAccessibilitySettings(); });
   R.appset.addEventListener('click', function () { if (A) A.openAppSettings(); });
   R.apps.addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('.day') : null;
     if (!b || !A) return;
     A.setMigPkg(b.getAttribute('data-p'));
-    startReading();
+    startReading(false);
   });
   R.copy.addEventListener('click', function () {
     if (A) A.copyText(R.raw.textContent);
