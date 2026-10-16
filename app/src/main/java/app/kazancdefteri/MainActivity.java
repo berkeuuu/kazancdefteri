@@ -288,6 +288,17 @@ public class MainActivity extends Activity {
             return beginRead(false);
         }
 
+        /** Okumadan sonra saatlik hız bildirimini kurar (delaySec saniye sonra). */
+        @JavascriptInterface
+        public void scheduleHint(String title, String text, int delaySec) {
+            HintReceiver.schedule(MainActivity.this, title, text, delaySec * 1000L);
+        }
+
+        @JavascriptInterface
+        public void cancelHint() {
+            HintReceiver.cancel(MainActivity.this);
+        }
+
         /** Sadece bugünün kartını okur. */
         @JavascriptInterface
         public String startReadToday() {
