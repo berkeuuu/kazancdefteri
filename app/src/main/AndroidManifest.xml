@@ -35,6 +35,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".HintReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>
