@@ -153,11 +153,15 @@ public class ReaderService extends AccessibilityService {
         instance = this;
         handler.removeCallbacks(ticker);
         handler.postDelayed(ticker, 1400);
+        handler.removeCallbacks(navTicker);
+        handler.postDelayed(navTicker, 900);
     }
 
     @Override
     public void onDestroy() {
         handler.removeCallbacks(ticker);
+        handler.removeCallbacks(navTicker);
+        hideNav();
         removeOverlay();
         if (instance == this) {
             instance = null;
@@ -168,6 +172,8 @@ public class ReaderService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         handler.removeCallbacks(ticker);
+        handler.removeCallbacks(navTicker);
+        hideNav();
         removeOverlay();
         if (instance == this) {
             instance = null;
@@ -640,6 +646,10 @@ public class ReaderService extends AccessibilityService {
     }
 
     private void walk(AccessibilityNodeInfo n, ArrayList<Item> out, int depth) {
+        walk(n, out, depth, 200);
+    }
+
+    private void walk(AccessibilityNodeInfo n, ArrayList<Item> out, int depth, int maxLen) {
         if (n == null || depth > 50 || out.size() > 1500) {
             return;
         }
@@ -650,7 +660,7 @@ public class ReaderService extends AccessibilityService {
             }
             if (t != null) {
                 String s = t.toString().trim();
-                if (s.length() > 0 && s.length() < 200) {
+                if (s.length() > 0 && s.length() < maxLen) {
                     Rect r = new Rect();
                     n.getBoundsInScreen(r);
                     Item it = new Item();
@@ -666,8 +676,186 @@ public class ReaderService extends AccessibilityService {
         for (int i = 0; i < c; i++) {
             AccessibilityNodeInfo ch = n.getChild(i);
             if (ch != null) {
-                walk(ch, out, depth + 1);
+                walk(ch, out, depth + 1, maxLen);
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // "Navi'ye Git" düğmesi: Migpack > Görev Detayı ekranında belirir.
+    // Sadece Migpack'in ekranına bakar; adres telefondan çıkmaz.
+    // ---------------------------------------------------------------------
+
+    private final Runnable navTicker = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                navStep();
+            } catch (Exception e) {
+                // bir sonraki turda tekrar dene
+            }
+            handler.postDelayed(this, 900);
+        }
+    };
+
+    private Button navBtn;
+    private WindowManager.LayoutParams navLp;
+
+    private boolean isMigpackPkg(String pkg) {
+        try {
+            if (pkg.toLowerCase(java.util.Locale.ROOT).contains("migpack")) {
+                return true;
+            }
+            CharSequence label = getPackageManager().getApplicationLabel(
+                    getPackageManager().getApplicationInfo(pkg, 0));
+            return label != null
+                    && label.toString().toLowerCase(java.util.Locale.ROOT).replace(" ", "").contains("migpack");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Ekrandaki Teslimat Adresi yazısı; Görev Detayı ekranında değilsek null. */
+    private String readAddress(AccessibilityNodeInfo root) {
+        ArrayList<Item> items = new ArrayList<Item>();
+        walk(root, items, 0, 600);
+        if (items.isEmpty()) {
+            return null;
+        }
+        Collections.sort(items, BY_TOP);
+        Item head = null;
+        for (Item it : items) {
+            if (it.text.equalsIgnoreCase("Teslimat Adresi")) {
+                head = it;
+                break;
+            }
+        }
+        if (head == null) {
+            return null;
+        }
+        for (Item it : items) {
+            if (it.top > head.top && it.text.length() > 8) {
+                return it.text;
+            }
+        }
+        return null;
+    }
+
+    private void navStep() {
+        if (overlay != null) {
+            // okuma ekranı açıkken düğme görünmesin
+            hideNav();
+            return;
+        }
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            return;
+        }
+        CharSequence rp = root.getPackageName();
+        if (rp == null) {
+            return;
+        }
+        String pkg = rp.toString();
+        SharedPreferences p = prefs();
+        String mig = p.getString("mig_pkg", "");
+        if (mig.length() == 0) {
+            if (isMigpackPkg(pkg)) {
+                p.edit().putString("mig_pkg", pkg).apply();
+                mig = pkg;
+            }
+        }
+        if (!pkg.equals(mig)) {
+            hideNav();
+            return;
+        }
+        String addr = readAddress(root);
+        if (addr == null || NavHelper.parse(addr) == null) {
+            hideNav();
+            return;
+        }
+        showNav();
+    }
+
+    private void showNav() {
+        if (navBtn != null) {
+            return;
+        }
+        try {
+            if (wm == null) {
+                wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+            }
+            navBtn = new Button(this);
+            navBtn.setText("Navi'ye Git ➤");
+            navBtn.setAllCaps(false);
+            navBtn.setTextSize(15);
+            navBtn.setTextColor(0xFF1B1B1B);
+            navBtn.setPadding(dp(18), dp(8), dp(18), dp(8));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(0xFFFFC400);
+            bg.setCornerRadius(dp(26));
+            bg.setStroke(dp(2), 0xFF1B1B1B);
+            navBtn.setBackground(bg);
+            navBtn.setElevation(dp(6));
+            navBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    goNavi(false);
+                }
+            });
+            navBtn.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    goNavi(true);
+                    return true;
+                }
+            });
+            navLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    PixelFormat.TRANSLUCENT);
+            navLp.gravity = Gravity.BOTTOM | Gravity.END;
+            navLp.x = dp(12);
+            navLp.y = dp(175);
+            wm.addView(navBtn, navLp);
+        } catch (Exception e) {
+            navBtn = null;
+        }
+    }
+
+    private void hideNav() {
+        if (navBtn != null) {
+            try {
+                wm.removeView(navBtn);
+            } catch (Exception e) {
+                // zaten kalkmış
+            }
+            navBtn = null;
+        }
+    }
+
+    /** Kısa basış: ana adres. Uzun basış: müşterinin yazdığı tarifle yedek arama. */
+    private void goNavi(boolean useAlt) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        String addr = root == null ? null : readAddress(root);
+        NavHelper.Query q = NavHelper.parse(addr);
+        if (q == null) {
+            toast("Adres okunamadı.");
+            return;
+        }
+        String text = q.main;
+        if (useAlt) {
+            if (q.alt == null) {
+                toast("Yedek adres yok, ana adres açılıyor.");
+            } else {
+                text = q.alt;
+            }
+        }
+        if (!NavHelper.open(getApplicationContext(), text)) {
+            toast("Yandex Navi açılamadı.");
+            return;
+        }
+        toast(text);
     }
 }
