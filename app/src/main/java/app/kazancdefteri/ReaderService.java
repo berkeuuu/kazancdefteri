@@ -41,7 +41,7 @@ public class ReaderService extends AccessibilityService {
 
     /** "01 Ekim Perşembe" gibi gün başlıkları */
     private static final Pattern HEADER = Pattern.compile(
-            "^\\d{1,2}\\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\\s+\\p{L}+$",
+            "^\\d{1,2}\\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\\s+\\p{L}+(,\\s*[\\p{L}\\p{N}_]+)?$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     private static final int MAX_ACTIONS = 150;
@@ -107,10 +107,37 @@ public class ReaderService extends AccessibilityService {
     private boolean announced = false;
     private boolean overlayDone = false;
     private boolean clicked = false;
+    private int clicks = 0;
     private int clickTick = 0;
     private int tail = 0;
     private String lastSig = "";
     private long runStart = 0L;
+
+    /** Gün başlığının adı: "2 Ekim Cuma, 40" veya "2 Ekim Cuma, chevron_down" -> "2 Ekim Cuma". */
+    private static String headKey(String t) {
+        int c = t.indexOf(',');
+        return (c >= 0 ? t.substring(0, c) : t).trim();
+    }
+
+    /** Kart açıldığında görünen satırlar (yeni sürüm: "Aktif çalışma süresi", eski sürüm: "Paketler"). */
+    private static boolean isDetail(String t) {
+        String l = t.toLowerCase(java.util.Locale.ROOT);
+        return l.startsWith("paketler") || l.startsWith("aktif çal") || l.startsWith("aktif cal")
+                || l.startsWith("kay\u0131p s") || l.startsWith("kayıp s");
+    }
+
+    /** Kart açık mı? Açıkken başlıkta paket sayısı görünür ("1 Ekim Perşembe, 37") ya da detay satırları vardır. */
+    private static boolean isExpanded(Item h, ArrayList<Item> items, int limit) {
+        if (Pattern.compile(",\\s*\\d+$").matcher(h.text).find()) {
+            return true;
+        }
+        for (Item it : items) {
+            if (it.top > h.top && it.top < limit && isDetail(it.text)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private SharedPreferences prefs() {
         return getSharedPreferences("reader", MODE_PRIVATE);
@@ -307,6 +334,18 @@ public class ReaderService extends AccessibilityService {
         }
     }
 
+    /** Başlık satırı olarak tıklanabilen öğe (içindeki yazı parçaları değil). */
+    private static boolean isHeadNode(Item it) {
+        AccessibilityNodeInfo c = it.node;
+        for (int g = 0; c != null && g < 3; g++) {
+            if (c.isClickable()) {
+                return true;
+            }
+            c = c.getParent();
+        }
+        return false;
+    }
+
     private void step() {
         SharedPreferences p = prefs();
         long now = System.currentTimeMillis();
@@ -328,6 +367,7 @@ public class ReaderService extends AccessibilityService {
             announced = false;
             overlayDone = false;
             clicked = false;
+            clicks = 0;
             clickTick = 0;
             tail = 0;
             lastSig = "";
@@ -357,8 +397,17 @@ public class ReaderService extends AccessibilityService {
 
         ArrayList<Item> headers = new ArrayList<Item>();
         for (Item it : items) {
-            if (HEADER.matcher(it.text).matches()) {
-                headers.add(it);
+            if (HEADER.matcher(it.text).matches() && isHeadNode(it)) {
+                boolean dup = false;
+                for (Item h0 : headers) {
+                    if (headKey(h0.text).equals(headKey(it.text))) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) {
+                    headers.add(it);
+                }
             }
         }
         if (finished) {
@@ -383,16 +432,10 @@ public class ReaderService extends AccessibilityService {
         for (int i = 0; i < headers.size(); i++) {
             Item h = headers.get(i);
             int limit = (i + 1 < headers.size()) ? headers.get(i + 1).top : Integer.MAX_VALUE;
-            boolean expanded = false;
-            for (Item it : items) {
-                if (it.top > h.top && it.top < limit && it.text.startsWith("Paketler")) {
-                    expanded = true;
-                    break;
-                }
-            }
+            boolean expanded = isExpanded(h, items, limit);
             if (expanded) {
-                done.add(h.text);
-            } else if (target == null && !done.contains(h.text)) {
+                done.add(headKey(h.text));
+            } else if (target == null && !done.contains(headKey(h.text))) {
                 target = h;
             }
         }
@@ -404,7 +447,7 @@ public class ReaderService extends AccessibilityService {
 
         if (target != null) {
             click(target.node);
-            done.add(target.text);
+            done.add(headKey(target.text));
             actions++;
             return;
         }
@@ -454,15 +497,14 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         int limit = (idx + 1 < headers.size()) ? headers.get(idx + 1).top : Integer.MAX_VALUE;
-        boolean expanded = false;
-        for (Item it : items) {
-            if (it.top > th.top && it.top < limit && it.text.startsWith("Paketler")) {
-                expanded = true;
-                break;
-            }
-        }
+        boolean expanded = isExpanded(th, items, limit);
         if (!expanded) {
+            if (clicks >= 2 && actions - clickTick >= 3) {
+                finish(p);
+                return;
+            }
             if (!clicked || actions - clickTick >= 3) {
+                clicks++;
                 click(th.node);
                 clicked = true;
                 clickTick = actions;
