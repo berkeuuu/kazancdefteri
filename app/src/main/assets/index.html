@@ -655,7 +655,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
         h += '<br>' + (sel ? '▶ ' : '• ') + (sel ? '<strong>' + x[1] + '</strong>' : x[1]) + ': saatte ' + nf1.format(pi.rate) + ' paketle bugünü yaklaşık <strong>' + k + ' paketle</strong> kapatırsın (günlük prim ' + tl(lookup(RATES.daily, k)) + '). Günlük ortalaman ' + nf1.format(base0) + ' → <strong>' + nf1.format(c.avg) + '</strong> olur, ay sonu tahmini ' + tl(c.sum.total) + ' (' + num(c.sum.packages) + ' paket).';
       });
     } else {
-      h += '<br>Saatlik hızı hesaplamak için en az 1 saatlik çalışma gerekir.';
+      h += '<br>Saatlik hızı hesaplamak için en az 1 saatlik çalışma gerekir.<br><span class="brkq">Mola durumu:</span> ' + brkToggle();
     }
     var ks = [], labels = {};
     var need = goal ? needPerDay(sp, goal) : 0;
@@ -726,6 +726,8 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
       var cp2 = curPace(sp.live);
       if (cp2.rate > 0) {
         h += '<p class="hs">Bugünkü hızın saatte ' + nf1.format(cp2.rate) + ' paket (' + fmtHM(cp2.eff) + ' çalışılan sürede). <span class="brkq">Mola:</span> ' + brkToggle() + ' Bu hızla bugünü yaklaşık <strong>' + cp2.k + ' paketle</strong> kapatırsın.</p>';
+      } else {
+        h += '<p class="hs"><span class="brkq">Mola:</span> ' + brkToggle() + ' Saatlik hız, 1 saat çalışınca görünür.</p>';
       }
       if (nd > sp.live.pk && nd <= 150) {
         h += '<p class="hs">Bugün devam ediyor: şu an ' + sp.live.pk + ' paket. Hedefin için bugünü <strong>' + nd + ' paketle</strong> kapatmalısın; kapatırsan ortalaman ' + nf1.format(closeToday(sp, nd).avg) + ' olur.</p>';
@@ -1324,7 +1326,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
         R.add.click();
         return;
       }
-      if (rd.cands.length || rd.offs.length || rd.month) {
+      if (rd.cands.length || rd.offs.length || rd.month || d.crawl === 'done') {
         setTab('read', true);
         rmsg((d.crawl === 'done' ? 'Okuma bitti. ' : 'Okuma sürüyor olabilir. ') + rd.cands.length + ' gün bulundu. Aşağıda kontrol et.', false);
       }
