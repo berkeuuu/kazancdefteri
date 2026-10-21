@@ -1172,7 +1172,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   }
   /* Satırı boş parçalardan ve fazla boşluktan temizler: "a |  | b" -> "a | b" */
   function cleanRow(r) {
-    return String(r).replace(/[\uE000-\uF8FF\u200B-\u200F\uFEFF]/g, '').replace(/\s+/g, ' ').split('|').map(function (x) { return x.trim(); }).filter(Boolean).join(' | ');
+    return String(r).replace(/[\uE000-\uF8FF\u3400-\u9FFF\uF900-\uFAFF\u200B-\u200F\uFEFF]/g, '').replace(/\s+/g, ' ').split('|').map(function (x) { return x.trim(); }).filter(Boolean).join(' | ');
   }
   /* Gün başlığı: önce Migpack'in iç adından (daily-stats-2026-10-01), olmazsa "01 Ekim" yazısından */
   function findDate(t) {
@@ -1180,7 +1180,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     if (id) return mkKey(+id[1], +id[2], +id[3]);
     var segs = t.replace(/İ/g, 'I').split(' | ');
     for (var i = 0; i < segs.length; i++) {
-      var m = segs[i].match(/^\s*(\d{1,2})\s+(Oca|Şub|Sub|Mar|Nis|May|Haz|Tem|Ağu|Agu|Eyl|Eki|Kas|Ara)[a-zçğıöşü]*(?:\s+(\d{4}))?(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+)?\s*$/i);
+      var m = segs[i].match(/^\s*(\d{1,2})\s+(Oca|Şub|Sub|Mar|Nis|May|Haz|Tem|Ağu|Agu|Eyl|Eki|Kas|Ara)[a-zçğıöşü]*(?:\s+(\d{4}))?(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+)?(?:,\s*[\w]+)?\s*$/i);
       if (!m) continue;
       var mo = MONTHS[mon3(m[2])];
       if (mo) return mkKey(m[3] ? +m[3] : inferYear(mo), mo, +m[1]);
@@ -1189,10 +1189,23 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   }
   function pkOf(t) {
     var m = t.match(/(?:^|\| )Paketler \((\d+)\)/i);
-    return m ? +m[1] : null;
+    if (m) return +m[1];
+    /* Yeni Migpack: "1 Ekim Perşembe, 37" ya da "1 Ekim Perşembe | 37" */
+    m = t.match(/(?:^|\| )\d{1,2} [^\s,|\d]+ [^\s,|\d]+, (\d+)(?: \||$)/);
+    if (m) return +m[1];
+    m = t.match(/(?:^|\| )\d{1,2} [^\s,|\d]+ [^\s,|\d]+ \| (\d+)(?: \||$)/);
+    if (m) return +m[1];
+    /* Başlıkta sayı yoksa satırlardaki "5, Migros Yemek, Hızlı Teslimat" toplanır */
+    var sum = 0, n = 0, re = /(?:^|\| )(\d+), [^,|]+, [^,|]+(?= \||$)/g;
+    while ((m = re.exec(t))) { sum += +m[1]; n++; }
+    return n ? sum : null;
   }
   function hoursOf(t) {
-    var m = t.match(/Online S[üu]re \| Kay[ıi]p S[üu]re \| (\d+(?:[.,]\d+)?)/i);
+    /* Yeni Migpack: "Aktif çalışma süresi | 11s 58dk" */
+    var m = t.match(/Aktif [cç]al[ıi][sş]ma s[üu]resi \| (?:(\d+)\s*s)?\s*(?:(\d+)\s*dk)?(?: \||$)/i);
+    if (m && (m[1] || m[2])) return Math.round(((+m[1] || 0) + (+m[2] || 0) / 60) * 100) / 100;
+    if (m) return 0;
+    m = t.match(/Online S[üu]re \| Kay[ıi]p S[üu]re \| (\d+(?:[.,]\d+)?)/i);
     if (!m) m = t.match(/Online S[üu]re \| (\d+(?:[.,]\d+)?)/i);
     return m ? toNum(m[1]) : null;
   }
@@ -1201,8 +1214,9 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     var rows = rows0.map(cleanRow).filter(Boolean);
     var all = rows.join(' | ');
     if (/Çalışılan Gün/i.test(all)) {
-      var d = all.match(/Çalışılan Gün \| (\d+)/i);
-      return { month: { pk: pkOf(all), days: d ? +d[1] : null, h: hoursOf(all) } };
+      var d = all.match(/Çalışılan [Gg]ün \| (\d+)/i);
+      var mr = all.match(/\d{1,2} [^\s\d|-]+ - \d{1,2} [^\s\d|]+ \d{4} \| (\d+)/);
+      return { month: { pk: mr ? +mr[1] : pkOf(all), days: d ? +d[1] : null, h: hoursOf(all) } };
     }
     var blocks = [], cur = null, orphan = [];
     rows.forEach(function (r) {
@@ -1235,7 +1249,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     /* Paketler (0) ve saat yok (-) olan geçmiş günler = izin günü */
     var offs = Object.keys(days).sort().filter(function (k) {
       var d = days[k];
-      return d.pk === 0 && d.h === null && d.oh === null && k < todayKey;
+      return d.pk === 0 && !d.h && !d.oh && k < todayKey;
     });
     var out = Object.keys(days).sort().map(function (k) {
       var d = days[k];
