@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Kazanç Defteri</string>
     <string name="service_label">Kazanç Defteri Okuyucu</string>
-    <string name="service_desc">Sadece sen Migpack\'ten oku düğmesine bastığında, Migpack ekranındaki yazıları okur ve Kazanç Defteri\'ne aktarır. Başka uygulamaları okumaz, internete veri göndermez.</string>
+    <string name="service_desc">Sadece Migpack ekranına bakar: Migpack\'ten oku düğmesine bastığında yazıları Kazanç Defteri\'ne aktarır, sipariş ekranında da Navi\'ye Git düğmesi gösterir. Başka uygulamaları okumaz, internete veri göndermez.</string>
 </resources>
