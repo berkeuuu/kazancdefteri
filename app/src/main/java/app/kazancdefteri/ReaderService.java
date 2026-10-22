@@ -734,7 +734,9 @@ public class ReaderService extends AccessibilityService {
             return null;
         }
         for (Item it : items) {
-            if (it.top > head.top && it.text.length() > 8) {
+            // Yeşil ok düğmesinin gizli etiketi ("last-mile-...-button") gibi yazıları atla,
+            // sadece gerçekten adrese benzeyen satırı al.
+            if (it.top >= head.top && NavHelper.looksLikeAddress(it.text)) {
                 return it.text;
             }
         }

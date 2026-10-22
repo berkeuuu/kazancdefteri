@@ -31,7 +31,19 @@ public final class NavHelper {
     private static final Pattern CUT_TARIF = Pattern.compile("\\b(daire|d\\s*:|kat|apt|apartman|ap\\.).*$", FLAGS);
     private static final Pattern STREET_WORD = Pattern.compile("\\b(cadde|caddesi|cad\\.?|sokak|sk\\.?|bulvar|bulvarı|mahalle|mahallesi)\\b", FLAGS);
 
+    private static final Pattern ESKI_ADRES = Pattern.compile("^\\s*(eski\\s+adres|adres(\\s+tarifi)?)\\s*[:\\-]?\\s*", FLAGS);
+
     private NavHelper() {
+    }
+
+    /** Gerçek adres satırı mı? Düğme etiketleri, başlıklar gibi yazıları eler. */
+    public static boolean looksLikeAddress(String t) {
+        if (t == null || t.length() < 12 || t.indexOf(' ') < 0) {
+            return false;
+        }
+        return BINA.matcher(t).find() || MAH.matcher(t).find()
+                || ILCE.matcher(t.split("\\|")[0].trim()).find()
+                || t.toLowerCase(java.util.Locale.ROOT).contains("mahalle");
     }
 
     /** Ana ve yedek arama yazısı. alt boş olabilir. */
@@ -75,12 +87,25 @@ public final class NavHelper {
             return null;
         }
 
+        // Sokak adı sadece sayı ise ("100.Yıl Mahallesi 46") sonuna "Sokak" ekle ki Yandex anlasın.
+        if (left.toLowerCase(java.util.Locale.ROOT).matches(".*mahallesi\\s+\\d{1,6}$")) {
+            left = left + ". Sokak";
+        }
+
         Query q = new Query();
         q.main = left + (number.length() > 0 ? " No " + number : "") + " " + district;
 
         if (right.length() > 0 && STREET_WORD.matcher(right).find()) {
-            String r = CUT_TARIF.matcher(right).replaceAll("").replaceAll("\\s+", " ").trim();
+            String r = ESKI_ADRES.matcher(right).replaceFirst("");
+            r = CUT_TARIF.matcher(r).replaceAll("").replaceAll("\\s+", " ").trim();
             if (r.length() >= 6) {
+                // Tarifte mahalle yoksa ana adresteki mahalleyi başa ekle
+                if (!r.toLowerCase(java.util.Locale.ROOT).contains("mahalle")) {
+                    Matcher mm = Pattern.compile("^(.*?\\bMahallesi)\\b", FLAGS).matcher(left);
+                    if (mm.find()) {
+                        r = mm.group(1) + " " + r;
+                    }
+                }
                 q.alt = r + " " + district;
             }
         }
