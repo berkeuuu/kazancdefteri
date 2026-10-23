@@ -1494,6 +1494,22 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   });
   R.go.parentNode.appendChild(lastRawBtn);
 
+  /* Navi'de ilk yolla bulunamayan adresleri kopyala (bana gönderirsen kuralları düzeltirim) */
+  var navLogBtn = document.createElement('button');
+  navLogBtn.type = 'button';
+  navLogBtn.className = 'btn';
+  navLogBtn.textContent = 'Zor adresleri kopyala';
+  navLogBtn.addEventListener('click', function () {
+    var arr = [];
+    try { arr = JSON.parse(A.getNavLog()); } catch (e) { arr = []; }
+    if (!arr.length) { rmsg('Kayıtlı zor adres yok.', false); return; }
+    var t = arr.map(function (o) {
+      return new Date(o.t).toLocaleString('tr-TR') + '\nAdres: ' + o.adres + '\nYollar:\n' + o.yollar + '\nSon denenen: ' + o.denenen;
+    }).join('\n\n--------\n\n');
+    if (A) { A.copyText(t); }
+  });
+  R.go.parentNode.appendChild(navLogBtn);
+
   R.add.addEventListener('click', function () {
     saveLastRaw();
     var n = 0, lastKey = null, nOff = 0;

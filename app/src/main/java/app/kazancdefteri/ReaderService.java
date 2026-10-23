@@ -837,27 +837,108 @@ public class ReaderService extends AccessibilityService {
         }
     }
 
-    /** Kısa basış: ana adres. Uzun basış: müşterinin yazdığı tarifle yedek arama. */
-    private void goNavi(boolean useAlt) {
+    // --- Navi'ye Git: hangi yolun işe yaradığını hatırlar, zor adresleri biriktirir ---
+    private String navAddr = "";
+    private int navStart = 0;
+    private int navLong = 0;
+    private String pendKey = null;
+    private char pendKind = 'A';
+    private final Runnable navCommit = new Runnable() {
+        @Override
+        public void run() {
+            commitLearn();
+        }
+    };
+
+    /** Son açılan yol 2 dakika içinde tekrar denenmediyse "işe yaradı" sayılır ve bu sokak için hatırlanır. */
+    private void commitLearn() {
+        handler.removeCallbacks(navCommit);
+        if (pendKey != null && pendKey.length() > 0) {
+            getSharedPreferences("nav", MODE_PRIVATE).edit()
+                    .putString("k_" + pendKey, String.valueOf(pendKind)).apply();
+        }
+        pendKey = null;
+    }
+
+    private void logHard(String addr, NavHelper.Query q, int idx) {
+        try {
+            SharedPreferences np = getSharedPreferences("nav", MODE_PRIVATE);
+            JSONArray all = new JSONArray(np.getString("log", "[]"));
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("t", System.currentTimeMillis());
+            o.put("adres", addr);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < q.texts.size(); i++) {
+                sb.append(q.kinds.get(i)).append(": ").append(q.texts.get(i)).append("\n");
+            }
+            o.put("yollar", sb.toString().trim());
+            o.put("denenen", String.valueOf(q.kinds.get(idx)));
+            all.put(o);
+            if (all.length() > 60) {
+                JSONArray cut = new JSONArray();
+                for (int i = all.length() - 60; i < all.length(); i++) {
+                    cut.put(all.get(i));
+                }
+                all = cut;
+            }
+            np.edit().putString("log", all.toString()).apply();
+        } catch (Exception e) {
+            // kaydedilemediyse önemli değil
+        }
+    }
+
+    /**
+     * Kısa basış: bu sokakta daha önce işe yarayan yol (yoksa A: sokak+no).
+     * Uzun basış: her seferinde sıradaki başka yol (B mahalleli, C müşterinin tarifi ...).
+     */
+    private void goNavi(boolean longPress) {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         String addr = root == null ? null : readAddress(root);
         NavHelper.Query q = NavHelper.parse(addr);
-        if (q == null) {
+        if (q == null || q.texts.isEmpty()) {
             toast("Adres okunamadı.");
             return;
         }
-        String text = q.main;
-        if (useAlt) {
-            if (q.alt == null) {
-                toast("Yedek adres yok, ana adres açılıyor.");
-            } else {
-                text = q.alt;
+        int n = q.texts.size();
+        if (!addr.equals(navAddr)) {
+            if (pendKey != null) {
+                commitLearn();
+            }
+            navAddr = addr;
+            navLong = 0;
+            navStart = 0;
+            String lk = getSharedPreferences("nav", MODE_PRIVATE).getString("k_" + q.key, "");
+            if (lk.length() == 1) {
+                int ix = q.kinds.indexOf(Character.valueOf(lk.charAt(0)));
+                if (ix >= 0) {
+                    navStart = ix;
+                }
             }
         }
+        int idx = navStart;
+        if (longPress) {
+            if (n < 2) {
+                toast("Başka yol yok, aynı adres açılıyor.");
+            } else {
+                navLong++;
+                int k = (navLong - 1) % (n - 1);
+                idx = k >= navStart ? k + 1 : k;
+            }
+        } else {
+            navLong = 0;
+        }
+        String text = q.texts.get(idx);
         if (!NavHelper.open(getApplicationContext(), text)) {
             toast("Yandex Navi açılamadı.");
             return;
         }
-        toast(text);
+        pendKey = q.key;
+        pendKind = q.kinds.get(idx).charValue();
+        handler.removeCallbacks(navCommit);
+        handler.postDelayed(navCommit, 120000L);
+        if (idx != navStart || longPress) {
+            logHard(addr, q, idx);
+        }
+        toast((idx + 1) + "/" + n + ": " + text);
     }
 }

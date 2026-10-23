@@ -372,6 +372,17 @@ public class MainActivity extends Activity {
             prefs().edit().putString("snaps", "[]").putString("crawl", "").putLong("armed_until", 0L).apply();
         }
 
+        /** Navi'de ilk yolla bulunamayıp başka yola geçilen adresler (sadece telefonda saklanır). */
+        @JavascriptInterface
+        public String getNavLog() {
+            return getSharedPreferences("nav", MODE_PRIVATE).getString("log", "[]");
+        }
+
+        @JavascriptInterface
+        public void clearNavLog() {
+            getSharedPreferences("nav", MODE_PRIVATE).edit().remove("log").apply();
+        }
+
         @JavascriptInterface
         public void copyText(final String text) {
             runOnUiThread(new Runnable() {
