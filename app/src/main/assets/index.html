@@ -1231,7 +1231,73 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   }
   /* Bütün ekranları birleştirir. Kaydırınca bir günün alt kısmı sonraki ekranın başında kalabilir;
      o yazılar bir önceki ekranın son gününe aittir (o günün saati ancak orada görünmüş olabilir). */
+  /* Yeni Migpack: ekranlar kaydırılınca üst kenardaki birkaç gün başlığı tek satıra birleşiyor.
+     Bu yüzden satır satır değil, bütün yazıları sırayla (parça parça) okuyoruz:
+     "13 Ekim Salı, 41" ya da "13 Ekim Salı | 41" görülünce o gün başlar, "Aktif çalışma süresi"
+     etiketinden sonra gelen ilk süre o günün saatidir. Sonraki günün kapalı başlığı gelince gün biter. */
+  var DATE_SEG = /^(\d{1,2}) (Oca|Şub|Sub|Mar|Nis|May|Haz|Tem|Ağu|Agu|Eyl|Eki|Kas|Ara)[a-zçğıöşü]* ([A-Za-zÇĞİÖŞÜçğıöşü]+)(?:, ([\w]+))?$/i;
+  function durOf(s) {
+    var t = String(s).match(/^(?:(\d+)\s*s)?\s*(?:(\d+)\s*dk)?$/);
+    if (!t || !(t[1] || t[2])) return null;
+    return Math.round(((+t[1] || 0) + (+t[2] || 0) / 60) * 100) / 100;
+  }
+  function parseSeq(snaps) {
+    var days = {}, cur = null, aw = false, found = 0;
+    snaps.forEach(function (rows) {
+      var rr = rows.map(cleanRow).filter(Boolean);
+      if (/Çalışılan Gün/i.test(rr.join(' | '))) { cur = null; aw = false; return; }
+      var segs = [];
+      rr.forEach(function (r) { r.split(' | ').forEach(function (s) { if (s) segs.push(s); }); });
+      for (var i = 0; i < segs.length; i++) {
+        var m = segs[i].replace(/İ/g, 'I').match(DATE_SEG);
+        if (m) {
+          var mo = MONTHS[mon3(m[2])];
+          var key = mo ? mkKey(inferYear(mo), mo, +m[1]) : null;
+          if (!key) continue;
+          var cnt = null, strong = false;
+          if (m[4] && /^\d+$/.test(m[4])) { cnt = +m[4]; strong = true; }
+          else if (!m[4] && i + 1 < segs.length && /^\d+$/.test(segs[i + 1])) { cnt = +segs[i + 1]; }
+          if (cnt !== null) {
+            var d = days[key] || (days[key] = { key: key, pk: null, h: null, strong: false });
+            if (strong || !d.strong) { d.pk = cnt; d.strong = d.strong || strong; }
+            cur = key; aw = false; found++;
+          } else if (cur && key > cur) {
+            cur = null; aw = false;
+          }
+          continue;
+        }
+        if (!cur) continue;
+        if (/^Aktif [cç]al[ıi][sş]ma s[üu]resi$/i.test(segs[i])) { aw = true; continue; }
+        if (aw) {
+          var hv = durOf(segs[i]);
+          if (hv !== null) {
+            /* Birleşik satırda "Aktif" ve "Kayıp" süreleri ters sırada gelebilir: yan yana iki süre varsa büyüğü aktif süredir */
+            if (i + 1 < segs.length) {
+              var hv2 = durOf(segs[i + 1]);
+              if (hv2 !== null) { hv = Math.max(hv, hv2); i++; }
+            }
+            if (days[cur].h === null) { days[cur].h = hv; }
+            aw = false;
+          }
+        }
+      }
+    });
+    return { days: days, found: found };
+  }
   function parseSnaps(snaps) {
+    var old = parseSnapsOld(snaps);
+    var sq = parseSeq(snaps);
+    if (!sq.found) return old;
+    var offs = Object.keys(sq.days).sort().filter(function (k) {
+      var d = sq.days[k];
+      return d.pk === 0 && !d.h && k < todayKey;
+    });
+    var out = Object.keys(sq.days).sort().map(function (k) {
+      return { key: k, pk: sq.days[k].pk, h: sq.days[k].h };
+    }).filter(function (d) { return d.pk; });
+    return { cands: out, month: old.month, headers: sq.found, offs: offs };
+  }
+  function parseSnapsOld(snaps) {
     var days = {}, month = null, prevLast = null, headers = 0;
     snaps.forEach(function (rows) {
       var r = parseSnap(rows);
@@ -1274,17 +1340,31 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
 
   function fmt2(x) { return new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 }).format(x); }
 
+  /* Eklenirse ayın toplamı: okunan günler + okunmayıp zaten kayıtlı olan günler (aynı ay) */
+  function mergedTotal() {
+    var readSum = 0, ym = '', keys = {};
+    rd.cands.forEach(function (x) { readSum += x.pk; keys[x.key] = x.pk; if (x.key > ym) ym = x.key; });
+    ym = ym.slice(0, 7);
+    var sum = readSum;
+    Object.keys(state.days || {}).forEach(function (k) {
+      if (k.slice(0, 7) !== ym || keys[k] !== undefined || rd.offs.indexOf(k) >= 0) return;
+      sum += Number(state.days[k] && state.days[k].pk) || 0;
+    });
+    return { sum: sum, readSum: readSum };
+  }
+
   function renderReview() {
     if (!rd.snaps.length) { R.review.hidden = true; return; }
     R.review.hidden = false;
     var h = '';
-    var sumPk = 0;
-    rd.cands.forEach(function (x) { sumPk += x.pk; });
+    var mt = mergedTotal();
+    var sumPk = mt.readSum;
     if (rd.month) {
       h += '<p class="hint">Migpack aylık: ' + (rd.month.pk !== null ? num(rd.month.pk) + ' paket' : '?') +
         (rd.month.days !== null ? ', ' + rd.month.days + ' gün' : '') +
         (rd.month.h !== null ? ', ' + fmt2(rd.month.h) + ' saat' : '') + '. Okunan günlerin toplamı: ' + num(sumPk) + ' paket, ' + rd.cands.length + ' gün.' +
-        ((rd.month.pk !== null && rd.month.pk !== sumPk) ? ' <strong>Toplam tutmuyor, eksik gün olabilir.</strong>' : ' Toplam tutuyor.') + '</p>';
+        (mt.sum !== sumPk ? ' Okunmayan kayıtlı günlerle birlikte: ' + num(mt.sum) + ' paket.' : '') +
+        ((rd.month.pk !== null && rd.month.pk !== mt.sum) ? ' <strong>Toplam tutmuyor, eksik gün olabilir.</strong>' : ' Toplam tutuyor.') + '</p>';
     } else if (rd.cands.length) {
       h += '<p class="hint">Aylık toplamla karşılaştırmak için Migpack\'te Aylık sekmesine bir kere dokun, sonra buraya dön.</p>';
     }
@@ -1325,12 +1405,11 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
       if (d.crawl === 'done' && (rd.cands.length || rd.offs.length)) {
         /* Migpack aylık toplamı ile okunan günlerin toplamı tutmuyorsa kendiliğinden ekleme:
            günleri ve ham yazıyı göster, hangi günün tutmadığı bulunabilsin. */
-        var chkSum = 0;
-        rd.cands.forEach(function (x) { chkSum += x.pk; });
-        if (rd.month && rd.month.pk !== null && rd.month.pk !== chkSum) {
+        var mt = mergedTotal();
+        if (rd.month && rd.month.pk !== null && rd.month.pk !== mt.sum) {
           setTab('read', true);
-          rmsg('Okuma bitti ama toplam tutmuyor: Migpack aylık ' + num(rd.month.pk) + ', okunan günler ' + num(chkSum) +
-            ' (fark ' + num(Math.abs(rd.month.pk - chkSum)) + '). Eklemedim. Aşağıdaki günleri Migpack\'le karşılaştır, "Ham yazıyı kopyala"ya basıp bana gönder.', true);
+          rmsg('Okuma bitti ama toplam tutmuyor: Migpack aylık ' + num(rd.month.pk) + ', uygulamadaki günlerin toplamı ' + num(mt.sum) +
+            ' (fark ' + num(Math.abs(rd.month.pk - mt.sum)) + '). Eklemedim. Aşağıdaki günleri Migpack\'le karşılaştır, "Ham yazıyı kopyala"ya basıp bana gönder.', true);
           return;
         }
         R.add.click();
