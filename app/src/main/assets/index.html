@@ -1323,6 +1323,16 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     if (snaps.length && sig !== rd.shown) {
       rd.shown = sig;
       if (d.crawl === 'done' && (rd.cands.length || rd.offs.length)) {
+        /* Migpack aylık toplamı ile okunan günlerin toplamı tutmuyorsa kendiliğinden ekleme:
+           günleri ve ham yazıyı göster, hangi günün tutmadığı bulunabilsin. */
+        var chkSum = 0;
+        rd.cands.forEach(function (x) { chkSum += x.pk; });
+        if (rd.month && rd.month.pk !== null && rd.month.pk !== chkSum) {
+          setTab('read', true);
+          rmsg('Okuma bitti ama toplam tutmuyor: Migpack aylık ' + num(rd.month.pk) + ', okunan günler ' + num(chkSum) +
+            ' (fark ' + num(Math.abs(rd.month.pk - chkSum)) + '). Eklemedim. Aşağıdaki günleri Migpack\'le karşılaştır, "Ham yazıyı kopyala"ya basıp bana gönder.', true);
+          return;
+        }
         R.add.click();
         return;
       }
@@ -1384,7 +1394,29 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     renderReview();
     rmsg('Okunanlar silindi.', false);
   });
+  /* Eklemeden önce ham yazıyı sakla: sonradan "Son okumanın ham yazısı" ile kopyalanabilir */
+  function saveLastRaw() {
+    try {
+      var sum = 0;
+      rd.cands.forEach(function (x) { sum += x.pk; });
+      localStorage.setItem('lastRaw', String(R.raw.textContent || '').slice(0, 150000));
+      localStorage.setItem('lastRawInfo', 'Migpack aylık: ' + (rd.month && rd.month.pk !== null ? rd.month.pk : '?') + ' paket, okunan günlerin toplamı: ' + sum + ' paket, ' + rd.cands.length + ' gün.\n\n');
+    } catch (e) { /* saklanamadıysa önemli değil */ }
+  }
+  var lastRawBtn = document.createElement('button');
+  lastRawBtn.type = 'button';
+  lastRawBtn.className = 'btn';
+  lastRawBtn.textContent = 'Son okumanın ham yazısını kopyala';
+  lastRawBtn.addEventListener('click', function () {
+    var t = '';
+    try { t = (localStorage.getItem('lastRawInfo') || '') + (localStorage.getItem('lastRaw') || ''); } catch (e) { t = ''; }
+    if (!t.trim()) { rmsg('Saklı okuma yok. Önce "Tüm ayı oku" yap.', true); return; }
+    if (A) A.copyText(t);
+  });
+  R.go.parentNode.appendChild(lastRawBtn);
+
   R.add.addEventListener('click', function () {
+    saveLastRaw();
     var n = 0, lastKey = null, nOff = 0;
     rd.cands.forEach(function (x, i) {
       var cb = $('rc-' + i);
