@@ -419,6 +419,12 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** Son teslim konumu kaydı denemesinin sonucu. */
+        @JavascriptInterface
+        public String locDebug() {
+            return getSharedPreferences("nav", MODE_PRIVATE).getString("dbg", "");
+        }
+
         /** Kayıtlı teslimat konumu olan bina sayısı. */
         @JavascriptInterface
         public int locCount() {

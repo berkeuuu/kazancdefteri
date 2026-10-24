@@ -1543,10 +1543,10 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
   R.go.parentNode.appendChild(locClr);
   function updateLocInfo() {
     if (!A) { return; }
-    var st = 'none', n = 0;
-    try { st = A.locationState(); n = A.locCount(); } catch (e) { /* eski sürüm */ }
+    var st = 'none', n = 0, dg = '';
+    try { st = A.locationState(); n = A.locCount(); dg = A.locDebug(); } catch (e) { /* eski sürüm */ }
     var t = st === 'all' ? 'Konum izni tamam (her zaman).' : (st === 'fg' ? 'Konum izni var ama sadece uygulama açıkken. "Konum iznini aç"a basıp "Her zaman izin ver"i seç.' : 'Konum izni kapalı. Teslimat konumunu kaydetmek için "Konum iznini aç"a bas.');
-    locInfo.textContent = t + ' Konumu kayıtlı bina: ' + n + '.';
+    locInfo.textContent = t + ' Konumu kayıtlı bina: ' + n + '.' + (dg ? ' Son teslim kaydı: ' + dg : ' Henüz teslim ekranı görülmedi.');
   }
   window.updateLocInfo = updateLocInfo;
 
