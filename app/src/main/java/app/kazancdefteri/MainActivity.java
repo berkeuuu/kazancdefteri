@@ -132,6 +132,19 @@ public class MainActivity extends Activity {
         return "ok";
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 78 && grantResults != null && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && android.os.Build.VERSION.SDK_INT >= 29
+                && checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION")
+                != PackageManager.PERMISSION_GRANTED) {
+            // Arka planda konum için ikinci adım ("Her zaman izin ver")
+            requestPermissions(new String[]{"android.permission.ACCESS_BACKGROUND_LOCATION"}, 79);
+        }
+    }
+
     public class Bridge {
 
         @JavascriptInterface
@@ -370,6 +383,64 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void clearDump() {
             prefs().edit().putString("snaps", "[]").putString("crawl", "").putLong("armed_until", 0L).apply();
+        }
+
+        /** "none", "fg" (sadece uygulama açıkken) ya da "all" (her zaman). */
+        @JavascriptInterface
+        public String locationState() {
+            boolean fg = checkSelfPermission("android.permission.ACCESS_FINE_LOCATION")
+                    == PackageManager.PERMISSION_GRANTED;
+            if (!fg) {
+                return "none";
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 29
+                    && checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION")
+                    != PackageManager.PERMISSION_GRANTED) {
+                return "fg";
+            }
+            return "all";
+        }
+
+        @JavascriptInterface
+        public void requestLocation() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (checkSelfPermission("android.permission.ACCESS_FINE_LOCATION")
+                            != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{"android.permission.ACCESS_FINE_LOCATION",
+                                "android.permission.ACCESS_COARSE_LOCATION"}, 78);
+                    } else if (android.os.Build.VERSION.SDK_INT >= 29
+                            && checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION")
+                            != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{"android.permission.ACCESS_BACKGROUND_LOCATION"}, 79);
+                    }
+                }
+            });
+        }
+
+        /** Kayıtlı teslimat konumu olan bina sayısı. */
+        @JavascriptInterface
+        public int locCount() {
+            int n = 0;
+            for (String k : getSharedPreferences("nav", MODE_PRIVATE).getAll().keySet()) {
+                if (k.startsWith("loc_")) {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        @JavascriptInterface
+        public void clearLocations() {
+            SharedPreferences np = getSharedPreferences("nav", MODE_PRIVATE);
+            SharedPreferences.Editor ed = np.edit();
+            for (String k : new ArrayList<String>(np.getAll().keySet())) {
+                if (k.startsWith("loc_")) {
+                    ed.remove(k);
+                }
+            }
+            ed.apply();
         }
 
         /** Navi'de ilk yolla bulunamayıp başka yola geçilen adresler (sadece telefonda saklanır). */

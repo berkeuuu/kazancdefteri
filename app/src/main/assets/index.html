@@ -1336,6 +1336,7 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     R.status.textContent = on ? 'Okuma izni açık.' : 'Okuma izni kapalı. Önce izni aç.';
     R.status.className = 'msg' + (on ? '' : ' err');
     R.perm.hidden = on;
+    try { updateLocInfo(); } catch (e) { /* önemli değil */ }
   }
 
   function fmt2(x) { return new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 }).format(x); }
@@ -1509,6 +1510,45 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     if (A) { A.copyText(t); }
   });
   R.go.parentNode.appendChild(navLogBtn);
+
+  /* Teslim konumu: izin durumu, kayıtlı bina sayısı, izin ve silme düğmeleri */
+  var locInfo = document.createElement('p');
+  locInfo.className = 'hint';
+  R.go.parentNode.parentNode.insertBefore(locInfo, R.go.parentNode.nextSibling);
+  var locBtn = document.createElement('button');
+  locBtn.type = 'button';
+  locBtn.className = 'btn';
+  locBtn.textContent = 'Konum iznini aç';
+  locBtn.addEventListener('click', function () { if (A) { A.requestLocation(); } });
+  R.go.parentNode.appendChild(locBtn);
+  var locClr = document.createElement('button');
+  locClr.type = 'button';
+  locClr.className = 'btn';
+  locClr.textContent = 'Kayıtlı konumları sil';
+  var locClrArmed = false;
+  locClr.addEventListener('click', function () {
+    if (!A) { return; }
+    if (!locClrArmed) {
+      locClrArmed = true;
+      locClr.textContent = 'Emin misin? Silmek için tekrar bas';
+      setTimeout(function () { locClrArmed = false; locClr.textContent = 'Kayıtlı konumları sil'; }, 4000);
+      return;
+    }
+    locClrArmed = false;
+    locClr.textContent = 'Kayıtlı konumları sil';
+    A.clearLocations();
+    updateLocInfo();
+    rmsg('Kayıtlı konumlar silindi.', false);
+  });
+  R.go.parentNode.appendChild(locClr);
+  function updateLocInfo() {
+    if (!A) { return; }
+    var st = 'none', n = 0;
+    try { st = A.locationState(); n = A.locCount(); } catch (e) { /* eski sürüm */ }
+    var t = st === 'all' ? 'Konum izni tamam (her zaman).' : (st === 'fg' ? 'Konum izni var ama sadece uygulama açıkken. "Konum iznini aç"a basıp "Her zaman izin ver"i seç.' : 'Konum izni kapalı. Teslimat konumunu kaydetmek için "Konum iznini aç"a bas.');
+    locInfo.textContent = t + ' Konumu kayıtlı bina: ' + n + '.';
+  }
+  window.updateLocInfo = updateLocInfo;
 
   R.add.addEventListener('click', function () {
     saveLastRaw();
