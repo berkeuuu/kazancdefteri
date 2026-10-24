@@ -443,6 +443,16 @@ public class MainActivity extends Activity {
             ed.apply();
         }
 
+        /** Yerel adres veritabanı bilgisi (kayıt sayısı, veri tarihi); açılamazsa boş. */
+        @JavascriptInterface
+        public String addrDbInfo() {
+            try {
+                return AddrDb.info(getApplicationContext());
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
         /** Navi'de ilk yolla bulunamayıp başka yola geçilen adresler (sadece telefonda saklanır). */
         @JavascriptInterface
         public String getNavLog() {

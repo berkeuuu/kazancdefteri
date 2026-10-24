@@ -58,6 +58,11 @@ public final class NavHelper {
         public String key = "";
         /** Bina kimliği: mahalle + sokak + bina no (daire hariç). Bina no yoksa boş. */
         public String bkey = "";
+        /** Veritabanı eşleştirmesi için: mahalle (sonekli "Mahallesi" olmadan), sokak adı anahtarı, sokak türü, bina no (harfli, "/" öncesi). */
+        public String mahK = "";
+        public String strK = "";
+        public String strTyp = "";
+        public String no = "";
 
         void add(String text, char kind) {
             String k = key(text.replaceAll("(?i)\\bno\\b", ""));
@@ -361,6 +366,13 @@ public final class NavHelper {
 
         q.key = key(mahalleStr + " " + join(name));
         q.bkey = number.length() > 0 ? q.key + "_" + key(number) : "";
+        q.mahK = key(mahalleStr.replaceAll("(?i)\\s*mahallesi\\s*$", ""));
+        q.strK = key(join(name));
+        String ftp = fold(type);
+        q.strTyp = ftp.startsWith("cadde") ? "cadde" : ftp.startsWith("sokak") || ftp.startsWith("sokag") ? "sokak"
+                : ftp.startsWith("bulvar") ? "bulvar" : ftp.startsWith("yolu") ? "yol"
+                : ftp.startsWith("cikma") ? "cikmaz" : ftp.startsWith("meydan") ? "meydan" : "";
+        q.no = number;
         return q;
     }
 
