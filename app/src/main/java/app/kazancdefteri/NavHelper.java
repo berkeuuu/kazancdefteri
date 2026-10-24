@@ -54,6 +54,8 @@ public final class NavHelper {
         public final ArrayList<String> texts = new ArrayList<String>();
         public final ArrayList<Character> kinds = new ArrayList<Character>();
         public String key = "";
+        /** Bina kimliği: mahalle + sokak + bina no (daire hariç). Bina no yoksa boş. */
+        public String bkey = "";
 
         void add(String text, char kind) {
             String k = key(text.replaceAll("(?i)\\bno\\b", ""));
@@ -283,7 +285,8 @@ public final class NavHelper {
             q.add(c, 'C');
         }
 
-        q.key = key(mahalleStr + " " + join(name) + (numbered ? " " + type : ""));
+        q.key = key(mahalleStr + " " + join(name));
+        q.bkey = number.length() > 0 ? q.key + "_" + key(number) : "";
         return q;
     }
 
@@ -386,6 +389,72 @@ public final class NavHelper {
         }
         out.addAll(c);
         return join(out) + " " + district;
+    }
+
+    // ------------------------------------------------------------------ kayıtlı teslimat konumları
+
+    /** İki nokta arası metre ([lat, lon] dizileri). */
+    public static double dist(double[] a, double[] b) {
+        double r = 6371000.0;
+        double p1 = Math.toRadians(a[0]);
+        double p2 = Math.toRadians(b[0]);
+        double dp = p2 - p1;
+        double dl = Math.toRadians(b[1] - a[1]);
+        double h = Math.sin(dp / 2) * Math.sin(dp / 2)
+                + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+        return 2 * r * Math.asin(Math.min(1.0, Math.sqrt(h)));
+    }
+
+    /**
+     * Kayıtlı noktaların "ortası" (eskiden yeniye sıralı liste). 1-2 noktada en yenisi,
+     * 3 ve fazlada diğerlerine en yakın nokta; böylece yanlış basılan tek bir teslimat sonucu bozmaz.
+     */
+    public static double[] medoid(java.util.List<double[]> pts) {
+        if (pts == null || pts.isEmpty()) {
+            return null;
+        }
+        if (pts.size() <= 2) {
+            return pts.get(pts.size() - 1);
+        }
+        double[] best = null;
+        double bestSum = Double.MAX_VALUE;
+        for (int i = pts.size() - 1; i >= 0; i--) {
+            double sum = 0;
+            for (int j = 0; j < pts.size(); j++) {
+                if (i != j) {
+                    sum += dist(pts.get(i), pts.get(j));
+                }
+            }
+            if (sum < bestSum) {
+                bestSum = sum;
+                best = pts.get(i);
+            }
+        }
+        return best;
+    }
+
+    /** Yandex Navi'de koordinata rota kurar. Başarılıysa true. */
+    public static boolean openCoord(Context ctx, double lat, double lon) {
+        String la = String.format(Locale.US, "%.6f", lat);
+        String lo = String.format(Locale.US, "%.6f", lon);
+        String[] uris = {
+                "yandexnavi://build_route_on_map?lat_to=" + la + "&lon_to=" + lo,
+                "yandexmaps://maps.yandex.com/?rtext=~" + la + "," + lo + "&rtt=auto",
+                "geo:" + la + "," + lo + "?q=" + la + "," + lo
+        };
+        for (String u : uris) {
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(i);
+                return true;
+            } catch (ActivityNotFoundException e) {
+                // bir sonrakini dene
+            } catch (Exception e) {
+                // bir sonrakini dene
+            }
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ Yandex'i aç

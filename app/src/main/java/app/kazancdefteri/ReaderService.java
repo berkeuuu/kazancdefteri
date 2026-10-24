@@ -771,11 +771,196 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         String addr = readAddress(root);
+        if (addr != null) {
+            lastAddr = addr;
+            lastAddrAt = System.currentTimeMillis();
+        } else if (isDeliveredScreen(root)) {
+            recordDelivery();
+        }
         if (addr == null || NavHelper.parse(addr) == null) {
             hideNav();
             return;
         }
         showNav();
+    }
+
+    // --- Teslim edilen binanın konumunu kaydet ---
+    private String lastAddr = null;
+    private long lastAddrAt = 0L;
+    private long lastSavedAt = -1L;
+    private boolean permToast = false;
+
+    /** Migpack'te "Sipariş ... teslim edildi" tikli ekranı (Göreve Dön / Mola Ver) mı? */
+    private boolean isDeliveredScreen(AccessibilityNodeInfo root) {
+        ArrayList<Item> items = new ArrayList<Item>();
+        walk(root, items, 0, 300);
+        boolean done = false;
+        boolean back = false;
+        for (Item it : items) {
+            String f = NavHelper.fold(it.text);
+            if (f.contains("teslim edildi")) {
+                done = true;
+            }
+            if (f.contains("goreve don")) {
+                back = true;
+            }
+        }
+        return done && back;
+    }
+
+    private void recordDelivery() {
+        long now = System.currentTimeMillis();
+        if (lastAddr == null || now - lastAddrAt > 60000L || lastSavedAt == lastAddrAt) {
+            return;
+        }
+        lastSavedAt = lastAddrAt;
+        NavHelper.Query q = NavHelper.parse(lastAddr);
+        if (q == null || q.bkey.length() == 0) {
+            return;
+        }
+        if (checkSelfPermission("android.permission.ACCESS_FINE_LOCATION")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (!permToast) {
+                permToast = true;
+                toast("Konum izni yok. Kazanç Defteri > Migpack sekmesinden aç.");
+            }
+            return;
+        }
+        final String bkey = q.bkey;
+        grabLocation(new LocCb() {
+            @Override
+            public void got(android.location.Location l) {
+                if (l == null) {
+                    toast("Teslimat konumu alınamadı.");
+                    return;
+                }
+                if (saveLocation(bkey, l)) {
+                    toast("Teslimat konumu kaydedildi.");
+                }
+            }
+        });
+    }
+
+    private interface LocCb {
+        void got(android.location.Location l);
+    }
+
+    /** Son 90 saniyede alınmış, yeterince doğru bir konum varsa onu; yoksa yeni konum ister. */
+    private void grabLocation(final LocCb cb) {
+        final android.location.LocationManager lm =
+                (android.location.LocationManager) getSystemService(LOCATION_SERVICE);
+        if (lm == null) {
+            cb.got(null);
+            return;
+        }
+        android.location.Location best = null;
+        try {
+            for (String pv : lm.getProviders(true)) {
+                android.location.Location l = null;
+                try {
+                    l = lm.getLastKnownLocation(pv);
+                } catch (SecurityException se) {
+                    l = null;
+                }
+                if (l == null) {
+                    continue;
+                }
+                long ageMs = (android.os.SystemClock.elapsedRealtimeNanos() - l.getElapsedRealtimeNanos()) / 1000000L;
+                if (ageMs > 90000L || l.getAccuracy() > 60f) {
+                    continue;
+                }
+                if (best == null || l.getAccuracy() < best.getAccuracy()) {
+                    best = l;
+                }
+            }
+        } catch (Exception e) {
+            best = null;
+        }
+        if (best != null) {
+            cb.got(best);
+            return;
+        }
+        String pv = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
+                ? android.location.LocationManager.GPS_PROVIDER
+                : android.location.LocationManager.NETWORK_PROVIDER;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                lm.getCurrentLocation(pv, null, new java.util.concurrent.Executor() {
+                    @Override
+                    public void execute(Runnable r) {
+                        handler.post(r);
+                    }
+                }, new java.util.function.Consumer<android.location.Location>() {
+                    @Override
+                    public void accept(android.location.Location l) {
+                        cb.got(l);
+                    }
+                });
+            } else {
+                lm.requestSingleUpdate(pv, new android.location.LocationListener() {
+                    @Override
+                    public void onLocationChanged(android.location.Location l) {
+                        cb.got(l);
+                    }
+
+                    @Override
+                    public void onStatusChanged(String provider, int status, android.os.Bundle extras) {
+                    }
+
+                    @Override
+                    public void onProviderEnabled(String provider) {
+                    }
+
+                    @Override
+                    public void onProviderDisabled(String provider) {
+                    }
+                }, Looper.getMainLooper());
+            }
+        } catch (Exception e) {
+            cb.got(null);
+        }
+    }
+
+    /** Binanın kayıtlı noktalarına ekler (en fazla 5). */
+    private boolean saveLocation(String bkey, android.location.Location l) {
+        try {
+            SharedPreferences np = getSharedPreferences("nav", MODE_PRIVATE);
+            JSONArray arr = new JSONArray(np.getString("loc_" + bkey, "[]"));
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("la", l.getLatitude());
+            o.put("lo", l.getLongitude());
+            o.put("ac", (double) l.getAccuracy());
+            o.put("t", System.currentTimeMillis());
+            arr.put(o);
+            if (arr.length() > 5) {
+                JSONArray cut = new JSONArray();
+                for (int i = arr.length() - 5; i < arr.length(); i++) {
+                    cut.put(arr.get(i));
+                }
+                arr = cut;
+            }
+            np.edit().putString("loc_" + bkey, arr.toString()).apply();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Binanın kayıtlı noktalarının ortası: {lat, lon, nokta sayısı}; yoksa null. */
+    private double[] loadCoord(String bkey) {
+        try {
+            JSONArray arr = new JSONArray(getSharedPreferences("nav", MODE_PRIVATE)
+                    .getString("loc_" + bkey, "[]"));
+            ArrayList<double[]> pts = new ArrayList<double[]>();
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject o = arr.getJSONObject(i);
+                pts.add(new double[]{o.getDouble("la"), o.getDouble("lo")});
+            }
+            double[] m = NavHelper.medoid(pts);
+            return m == null ? null : new double[]{m[0], m[1], pts.size()};
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void showNav() {
@@ -899,6 +1084,11 @@ public class ReaderService extends AccessibilityService {
             toast("Adres okunamadı.");
             return;
         }
+        final double[] kc = q.bkey.length() > 0 ? loadCoord(q.bkey) : null;
+        if (kc != null) {
+            q.texts.add(0, "Kayıtlı konum (" + (int) kc[2] + " teslimat)");
+            q.kinds.add(0, Character.valueOf('K'));
+        }
         int n = q.texts.size();
         if (!addr.equals(navAddr)) {
             if (pendKey != null) {
@@ -907,7 +1097,7 @@ public class ReaderService extends AccessibilityService {
             navAddr = addr;
             navLong = 0;
             navStart = 0;
-            String lk = getSharedPreferences("nav", MODE_PRIVATE).getString("k_" + q.key, "");
+            String lk = kc != null ? "" : getSharedPreferences("nav", MODE_PRIVATE).getString("k_" + q.key, "");
             if (lk.length() == 1) {
                 int ix = q.kinds.indexOf(Character.valueOf(lk.charAt(0)));
                 if (ix >= 0) {
@@ -928,7 +1118,13 @@ public class ReaderService extends AccessibilityService {
             navLong = 0;
         }
         String text = q.texts.get(idx);
-        if (!NavHelper.open(getApplicationContext(), text)) {
+        boolean opened;
+        if (q.kinds.get(idx).charValue() == 'K' && kc != null) {
+            opened = NavHelper.openCoord(getApplicationContext(), kc[0], kc[1]);
+        } else {
+            opened = NavHelper.open(getApplicationContext(), text);
+        }
+        if (!opened) {
             toast("Yandex Navi açılamadı.");
             return;
         }
