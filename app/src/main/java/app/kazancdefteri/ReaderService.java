@@ -980,6 +980,35 @@ public class ReaderService extends AccessibilityService {
             o.put("lo", l.getLongitude());
             o.put("ac", (double) l.getAccuracy());
             o.put("t", System.currentTimeMillis());
+            // Aykırı nokta koruması: binanın en az 2 kaydı varsa ve yeni nokta 150 m'den uzaksa hemen kabul etme;
+            // ikinci bir teslimat da aynı yeri (100 m içinde) gösterirse bina gerçekten oradadır, kayıtlar yenilenir.
+            if (arr.length() >= 2) {
+                ArrayList<double[]> old = new ArrayList<double[]>();
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject p0 = arr.getJSONObject(i);
+                    old.add(new double[]{p0.getDouble("la"), p0.getDouble("lo")});
+                }
+                double[] now = new double[]{l.getLatitude(), l.getLongitude()};
+                if (NavHelper.dist(NavHelper.medoid(old), now) > 150.0) {
+                    String pk = "pend_" + bkey;
+                    org.json.JSONObject pend = null;
+                    try {
+                        pend = new org.json.JSONObject(np.getString(pk, "null"));
+                    } catch (Exception e) {
+                        pend = null;
+                    }
+                    if (pend != null && NavHelper.dist(new double[]{pend.getDouble("la"), pend.getDouble("lo")}, now) <= 100.0) {
+                        JSONArray fresh = new JSONArray();
+                        fresh.put(pend);
+                        fresh.put(o);
+                        np.edit().putString("loc_" + bkey, fresh.toString()).remove(pk).apply();
+                    } else {
+                        np.edit().putString(pk, o.toString()).apply();
+                    }
+                    return true;
+                }
+                np.edit().remove("pend_" + bkey).apply();
+            }
             arr.put(o);
             if (arr.length() > 5) {
                 JSONArray cut = new JSONArray();
