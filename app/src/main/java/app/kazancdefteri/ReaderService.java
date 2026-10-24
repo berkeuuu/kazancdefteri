@@ -1089,7 +1089,8 @@ public class ReaderService extends AccessibilityService {
     /** Son açılan yol 2 dakika içinde tekrar denenmediyse "işe yaradı" sayılır ve bu sokak için hatırlanır. */
     private void commitLearn() {
         handler.removeCallbacks(navCommit);
-        if (pendKey != null && pendKey.length() > 0) {
+        // Kayıtlı konum (K) ve veritabanı (G) kendi başına güvenilir: sokak için "öğrenilen yol" olarak yazılmaz
+        if (pendKey != null && pendKey.length() > 0 && pendKind != 'K' && pendKind != 'G') {
             getSharedPreferences("nav", MODE_PRIVATE).edit()
                     .putString("k_" + pendKey, String.valueOf(pendKind)).apply();
         }
@@ -1136,6 +1137,18 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         final double[] kc = q.bkey.length() > 0 ? loadCoord(q.bkey) : null;
+        // Yerel adres veritabanı (OpenStreetMap): sadece güvenli ve tek yerde toplanan eşleşme ilk yol olur
+        AddrMatch.Result gr = null;
+        try {
+            gr = AddrDb.find(getApplicationContext(), q);
+        } catch (Exception e) {
+            gr = null;
+        }
+        final double[] gc = gr != null && gr.auto ? new double[]{gr.lat, gr.lon} : null;
+        if (gc != null) {
+            q.texts.add(0, "Adres veritabanı: " + gr.desc);
+            q.kinds.add(0, Character.valueOf('G'));
+        }
         if (kc != null) {
             q.texts.add(0, "Kayıtlı konum (" + (int) kc[2] + " teslimat)");
             q.kinds.add(0, Character.valueOf('K'));
@@ -1148,7 +1161,7 @@ public class ReaderService extends AccessibilityService {
             navAddr = addr;
             navLong = 0;
             navStart = 0;
-            String lk = kc != null ? "" : getSharedPreferences("nav", MODE_PRIVATE).getString("k_" + q.key, "");
+            String lk = kc != null || gc != null ? "" : getSharedPreferences("nav", MODE_PRIVATE).getString("k_" + q.key, "");
             if (lk.length() == 1) {
                 int ix = q.kinds.indexOf(Character.valueOf(lk.charAt(0)));
                 if (ix >= 0) {
@@ -1177,6 +1190,8 @@ public class ReaderService extends AccessibilityService {
         boolean opened;
         if (q.kinds.get(idx).charValue() == 'K' && kc != null) {
             opened = NavHelper.openCoord(getApplicationContext(), kc[0], kc[1], fresh);
+        } else if (q.kinds.get(idx).charValue() == 'G' && gc != null) {
+            opened = NavHelper.openCoord(getApplicationContext(), gc[0], gc[1], fresh);
         } else {
             opened = NavHelper.open(getApplicationContext(), text, fresh);
         }

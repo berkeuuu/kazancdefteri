@@ -1541,6 +1541,15 @@ input[type="checkbox"] { width: 24px; height: 24px; flex: none; accent-color: va
     rmsg('Kayıtlı konumlar silindi.', false);
   });
   R.go.parentNode.appendChild(locClr);
+
+  /* Yerel adres veritabanı bilgisi ve OpenStreetMap atfı (ODbL) */
+  var dbInfo = document.createElement('p');
+  dbInfo.className = 'hint';
+  var dbTxt = '';
+  try { dbTxt = A ? A.addrDbInfo() : ''; } catch (e) { dbTxt = ''; }
+  dbInfo.textContent = (dbTxt ? 'Adres veritabanı: ' + dbTxt + '. ' : 'Adres veritabanı yüklenemedi (eski yöntem kullanılır). ') +
+    'Adres verisi © OpenStreetMap katkıda bulunanlar, ODbL lisansı (openstreetmap.org/copyright).';
+  R.go.parentNode.parentNode.insertBefore(dbInfo, R.go.parentNode.nextSibling);
   function updateLocInfo() {
     if (!A) { return; }
     var st = 'none', n = 0, dg = '';
