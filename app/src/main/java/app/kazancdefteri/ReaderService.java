@@ -774,8 +774,13 @@ public class ReaderService extends AccessibilityService {
         if (addr != null) {
             lastAddr = addr;
             lastAddrAt = System.currentTimeMillis();
+            String on = orderNoOf(root);
+            lastOrderNo = on;
+            if (on != null) {
+                orderAddr.put(on, addr);
+            }
         } else if (isDeliveredScreen(root)) {
-            recordDelivery();
+            recordDelivery(root);
         }
         if (addr == null || NavHelper.parse(addr) == null) {
             hideNav();
@@ -787,43 +792,81 @@ public class ReaderService extends AccessibilityService {
     // --- Teslim edilen binanın konumunu kaydet ---
     private String lastAddr = null;
     private long lastAddrAt = 0L;
-    private long lastSavedAt = -1L;
-    private boolean permToast = false;
+    private String lastOrderNo = null;
+    private final java.util.HashMap<String, String> orderAddr = new java.util.HashMap<String, String>();
+    private final java.util.HashSet<String> savedKeys = new java.util.HashSet<String>();
+
+    /** Ekrandaki sipariş numarası (en üstteki 9-12 haneli sayı), yoksa null. */
+    private String orderNoOf(AccessibilityNodeInfo root) {
+        ArrayList<Item> items = new ArrayList<Item>();
+        walk(root, items, 0, 40);
+        Item best = null;
+        for (Item it : items) {
+            if (it.text.matches("^\\d{9,12}$") && (best == null || it.top < best.top)) {
+                best = it;
+            }
+        }
+        return best == null ? null : best.text;
+    }
 
     /** Migpack'te "Sipariş ... teslim edildi" tikli ekranı (Göreve Dön / Mola Ver) mı? */
     private boolean isDeliveredScreen(AccessibilityNodeInfo root) {
         ArrayList<Item> items = new ArrayList<Item>();
         walk(root, items, 0, 300);
         boolean done = false;
-        boolean back = false;
+        boolean other = false;
         for (Item it : items) {
             String f = NavHelper.fold(it.text);
             if (f.contains("teslim edildi")) {
                 done = true;
             }
-            if (f.contains("goreve don")) {
-                back = true;
+            if (f.contains("goreve don") || f.contains("yolda gecen sure") || f.contains("mola ver")) {
+                other = true;
             }
         }
-        return done && back;
+        return done && other;
     }
 
-    private void recordDelivery() {
+    /** Son konum kaydı denemesinin sonucu (Migpack sekmesinde gösterilir). */
+    private void dbg(String msg, boolean showToast) {
+        try {
+            String t = new java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.US)
+                    .format(new java.util.Date());
+            getSharedPreferences("nav", MODE_PRIVATE).edit().putString("dbg", t + " " + msg).apply();
+        } catch (Exception e) {
+            // önemli değil
+        }
+        if (showToast) {
+            toast(msg);
+        }
+    }
+
+    private void recordDelivery(AccessibilityNodeInfo root) {
         long now = System.currentTimeMillis();
-        if (lastAddr == null || now - lastAddrAt > 60000L || lastSavedAt == lastAddrAt) {
+        String on = orderNoOf(root);
+        String addr = null;
+        if (on != null) {
+            addr = orderAddr.get(on);
+        } else if (lastAddr != null && now - lastAddrAt < 15 * 60 * 1000L) {
+            addr = lastAddr;
+        }
+        String dedupe = on != null ? on : String.valueOf(lastAddrAt);
+        if (savedKeys.contains(dedupe)) {
             return;
         }
-        lastSavedAt = lastAddrAt;
-        NavHelper.Query q = NavHelper.parse(lastAddr);
+        savedKeys.add(dedupe);
+        if (addr == null) {
+            dbg("Konum kaydı yok: bu siparişin adresi ekranda hiç görülmedi.", true);
+            return;
+        }
+        NavHelper.Query q = NavHelper.parse(addr);
         if (q == null || q.bkey.length() == 0) {
+            dbg("Konum kaydı yok: adreste bina no bulunamadı.", true);
             return;
         }
         if (checkSelfPermission("android.permission.ACCESS_FINE_LOCATION")
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            if (!permToast) {
-                permToast = true;
-                toast("Konum izni yok. Kazanç Defteri > Migpack sekmesinden aç.");
-            }
+            dbg("Konum kaydı yok: konum izni kapalı. Kazanç Defteri > Migpack sekmesinden aç.", true);
             return;
         }
         final String bkey = q.bkey;
@@ -831,11 +874,17 @@ public class ReaderService extends AccessibilityService {
             @Override
             public void got(android.location.Location l) {
                 if (l == null) {
-                    toast("Teslimat konumu alınamadı.");
+                    boolean bg = android.os.Build.VERSION.SDK_INT >= 29
+                            && checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION")
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED;
+                    dbg(bg ? "Konum alınamadı: izin sadece uygulama açıkken. 'Her zaman izin ver' gerekli."
+                            : "Konum alınamadı: GPS konumu gelmedi.", true);
                     return;
                 }
                 if (saveLocation(bkey, l)) {
-                    toast("Teslimat konumu kaydedildi.");
+                    dbg("Konum kaydedildi (doğruluk " + Math.round(l.getAccuracy()) + " m).", true);
+                } else {
+                    dbg("Konum kaydı yazılamadı.", true);
                 }
             }
         });
