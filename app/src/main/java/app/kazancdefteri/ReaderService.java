@@ -847,7 +847,9 @@ public class ReaderService extends AccessibilityService {
         String addr = null;
         if (on != null) {
             addr = orderAddr.get(on);
-        } else if (lastAddr != null && now - lastAddrAt < 15 * 60 * 1000L) {
+        }
+        if (addr == null && lastAddr != null && now - lastAddrAt < 10 * 60 * 1000L) {
+            // Sipariş numarası iki ekranda aynı okunamadıysa (ör. telefon numarası üstte kalmış): son görülen adres
             addr = lastAddr;
         }
         String dedupe = on != null ? on : String.valueOf(lastAddrAt);
