@@ -1023,6 +1023,8 @@ public class ReaderService extends AccessibilityService {
     }
 
     // --- Navi'ye Git: hangi yolun işe yaradığını hatırlar, zor adresleri biriktirir ---
+    private String lastOpenAddr = "";
+    private long lastOpenAt = 0L;
     private String navAddr = "";
     private int navStart = 0;
     private int navLong = 0;
@@ -1118,11 +1120,16 @@ public class ReaderService extends AccessibilityService {
             navLong = 0;
         }
         String text = q.texts.get(idx);
+        // Aynı adreste 3 dakika içinde tekrar basılıyorsa Navi önceki konumda takılmış olabilir: baştan aç
+        long nowMs = System.currentTimeMillis();
+        boolean fresh = addr.equals(lastOpenAddr) && nowMs - lastOpenAt < 180000L;
+        lastOpenAddr = addr;
+        lastOpenAt = nowMs;
         boolean opened;
         if (q.kinds.get(idx).charValue() == 'K' && kc != null) {
-            opened = NavHelper.openCoord(getApplicationContext(), kc[0], kc[1]);
+            opened = NavHelper.openCoord(getApplicationContext(), kc[0], kc[1], fresh);
         } else {
-            opened = NavHelper.open(getApplicationContext(), text);
+            opened = NavHelper.open(getApplicationContext(), text, fresh);
         }
         if (!opened) {
             toast("Yandex Navi açılamadı.");

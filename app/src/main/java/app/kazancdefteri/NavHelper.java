@@ -40,6 +40,8 @@ public final class NavHelper {
     private static final Pattern SLASH_NUM = Pattern.compile("^(\\d+)/\\d+$");
     private static final Pattern NO_COLON = Pattern.compile("^no:(\\d+)(/\\d+)?$");
     private static final Pattern DIGITS = Pattern.compile("^\\d+$");
+    private static final Pattern BLOK_NUM = Pattern.compile("\\bblok\\s*/?\\s*(\\d+[A-Za-z]?)", FLAGS);
+    private static final Pattern NUM_LETTER = Pattern.compile("^(\\d+)[A-Za-z]$");
 
     private static final HashSet<String> TYPES = new HashSet<String>(Arrays.asList(
             "caddesi", "cadde", "sokak", "sokagi", "bulvari", "bulvar", "yolu", "cikmazi", "cikmaz", "meydani"));
@@ -145,6 +147,9 @@ public final class NavHelper {
         }
         for (String p : t.split("\\s+")) {
             String e = expandToken(p);
+            if (e.matches("^\\d+\\.$")) {
+                e = e.substring(0, e.length() - 1);
+            }
             if (e.length() > 0) {
                 out.add(e);
             }
@@ -191,10 +196,22 @@ public final class NavHelper {
         }
 
         String number = "";
+        String leftFull = left;
         Matcher mb = BINA.matcher(left);
         if (mb.find()) {
             number = mb.group(1);
             left = left.substring(0, mb.start()).trim();
+            if (!number.matches(".*\\d.*")) {
+                // "Bina No:A Blok /45" -> bina no 45
+                Matcher bn = BLOK_NUM.matcher(leftFull);
+                if (!bn.find()) {
+                    bn = BLOK_NUM.matcher(right);
+                    if (!bn.find()) {
+                        bn = null;
+                    }
+                }
+                number = bn != null ? bn.group(1) : "";
+            }
         } else {
             Matcher mn = NO_ONLY.matcher(left);
             if (mn.find()) {
@@ -221,6 +238,15 @@ public final class NavHelper {
         }
         ArrayList<String> mahalle = new ArrayList<String>(lt.subList(0, mIdx + 1));
         ArrayList<String> street = new ArrayList<String>(lt.subList(mIdx + 1, lt.size()));
+        // Haritadan kopyalanmış adreslerde sokaktan sonra ilçe, il kodu, posta kodu, "Türkiye" gelir: kes
+        for (int i = 1; i < street.size(); i++) {
+            String f = fold(street.get(i));
+            if (f.startsWith("bandirma") || f.startsWith("balikesir") || f.startsWith("turkiye")
+                    || street.get(i).matches("^\\d{5}$")) {
+                street = new ArrayList<String>(street.subList(0, i));
+                break;
+            }
+        }
         String mahalleStr = join(mahalle);
 
         Query q = new Query();
@@ -239,6 +265,12 @@ public final class NavHelper {
             type = name.remove(name.size() - 1);
         }
         boolean numbered = name.size() == 1 && DIGITS.matcher(name.get(0)).matches();
+        for (int i = 0; i < name.size(); i++) {
+            String w = name.get(i);
+            if (w.length() > 1 && w.equals(w.toLowerCase(TR)) && Character.isLetter(w.charAt(0))) {
+                name.set(i, w.substring(0, 1).toUpperCase(TR) + w.substring(1));
+            }
+        }
 
         ArrayList<String> rt = new ArrayList<String>();
         if (right.length() > 0) {
@@ -260,8 +292,9 @@ public final class NavHelper {
         }
 
         String streetStr;
-        if (numbered && type.length() == 0) {
-            streetStr = join(name) + ". Sokak";
+        if (numbered) {
+            // numaralı sokak resmî yazımı: "912. Sokak"
+            streetStr = join(name) + ". " + (type.length() > 0 ? type : "Sokak");
         } else {
             streetStr = join(name) + (type.length() > 0 ? " " + type : "");
         }
@@ -271,9 +304,30 @@ public final class NavHelper {
 
         String numPart = number.length() > 0 ? number : "";
 
+        // D hazırlığı: "sok." yazılmış ama gerçekte cadde olabilir (ya da tersi)
+        String dText = null;
+        boolean dFirst = false;
+        if (!numbered && !name.isEmpty() && type.length() > 0) {
+            String ft = fold(type);
+            String swapped = (ft.startsWith("sokak") || ft.startsWith("sokag")) ? "Caddesi"
+                    : (ft.startsWith("cadde") ? "Sokak" : "");
+            if (swapped.length() > 0) {
+                dText = join(name) + " " + swapped + (numPart.length() > 0 ? " " + numPart : "") + " " + district;
+                // Müşteri tarifinde diğer türü anıyorsa ("caddede...") bu yol ikinci sırada denensin
+                String hint = fold(right) + " " + fold(join(rt));
+                boolean cadHint = hint.contains("cadde");
+                boolean sokHint = hint.contains("sokak");
+                dFirst = (swapped.equals("Caddesi") && cadHint && !sokHint)
+                        || (swapped.equals("Sokak") && sokHint && !cadHint);
+            }
+        }
+
         // A: sokak + no (numaralı sokakta yok)
         if (!numbered && !name.isEmpty()) {
             q.add(streetStr + (numPart.length() > 0 ? " " + numPart : "") + " " + district, 'A');
+            if (dFirst && dText != null) {
+                q.add(dText, 'D');
+            }
         }
         // B: mahalle + sokak + no
         q.add((mahalleStr.length() > 0 ? mahalleStr + " " : "") + streetStr
@@ -283,6 +337,26 @@ public final class NavHelper {
         String c = tarifText(rt, name, mahalle, district);
         if (c != null) {
             q.add(c, 'C');
+        }
+
+        // D: "sok." yazılmış ama gerçekte cadde olabilir (ya da tersi): türü değiştir, mahallesiz
+        if (!numbered && !name.isEmpty() && type.length() > 0) {
+            if (dText != null && !dFirst) {
+                q.add(dText, 'D');
+            }
+            // E: türsüz, mahalleli ("Mareşal Fevzi Çakmak 30")
+            q.add((mahalleStr.length() > 0 ? mahalleStr + " " : "") + join(name)
+                    + (numPart.length() > 0 ? " " + numPart : "") + " " + district, 'E');
+        }
+        // F: "47B" gibi harfli bina no, harfsiz dene
+        Matcher nl = NUM_LETTER.matcher(numPart);
+        if (nl.matches()) {
+            String dn = nl.group(1);
+            if (numbered) {
+                q.add((mahalleStr.length() > 0 ? mahalleStr + " " : "") + streetStr + " No " + dn + " " + district, 'F');
+            } else {
+                q.add(streetStr + " " + dn + " " + district, 'F');
+            }
         }
 
         q.key = key(mahalleStr + " " + join(name));
@@ -302,11 +376,22 @@ public final class NavHelper {
             String t = rt.get(i);
             String f = fold(t);
             if (CUT.contains(f)) {
-                // "ikizler sitesi" gibi site adını da at
+                // "ikizler sitesi", "A Blok" gibi site/blok adını da at
                 if (typeAt >= 0 && c.size() - 1 > typeAt
                         && !DIGITS.matcher(c.get(c.size() - 1)).matches()
                         && !c.get(c.size() - 1).equals("No")) {
                     c.remove(c.size() - 1);
+                }
+                // "Blok 45/7" -> No 45
+                if ((f.equals("blok") || f.equals("blogu")) && typeAt >= 0 && i + 1 < rt.size()
+                        && !c.contains("No")) {
+                    String nx = rt.get(i + 1);
+                    Matcher bs = SLASH_NUM.matcher(nx);
+                    String dg = bs.matches() ? bs.group(1) : (DIGITS.matcher(nx).matches() ? nx : null);
+                    if (dg != null) {
+                        c.add("No");
+                        c.add(dg);
+                    }
                 }
                 break;
             }
@@ -434,7 +519,7 @@ public final class NavHelper {
     }
 
     /** Yandex Navi'de koordinata rota kurar. Başarılıysa true. */
-    public static boolean openCoord(Context ctx, double lat, double lon) {
+    public static boolean openCoord(Context ctx, double lat, double lon, boolean fresh) {
         String la = String.format(Locale.US, "%.6f", lat);
         String lo = String.format(Locale.US, "%.6f", lon);
         String[] uris = {
@@ -446,6 +531,10 @@ public final class NavHelper {
             try {
                 Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (fresh) {
+                    // Navi önceki konumda takılı kalıyorsa: eski ekranı kapatıp yeni adresle baştan aç
+                    i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                }
                 ctx.startActivity(i);
                 return true;
             } catch (ActivityNotFoundException e) {
@@ -460,7 +549,7 @@ public final class NavHelper {
     // ------------------------------------------------------------------ Yandex'i aç
 
     /** Yandex Navi'yi aranan yazıyla açar. Başarılıysa true. */
-    public static boolean open(Context ctx, String query) {
+    public static boolean open(Context ctx, String query, boolean fresh) {
         String enc;
         try {
             enc = URLEncoder.encode(query, "UTF-8");
@@ -476,6 +565,10 @@ public final class NavHelper {
             try {
                 Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (fresh) {
+                    // Navi önceki konumda takılı kalıyorsa: eski ekranı kapatıp yeni adresle baştan aç
+                    i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                }
                 ctx.startActivity(i);
                 return true;
             } catch (ActivityNotFoundException e) {
