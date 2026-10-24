@@ -64,14 +64,15 @@ final class AddrMatch {
             }
         }
         if (q.strTyp.length() > 0) {
-            boolean typeOk = false;
+            ArrayList<Row> tr = new ArrayList<Row>();
             for (Row r : use) {
                 if (r.yolTur.equals(q.strTyp)) {
-                    typeOk = true;
-                    break;
+                    tr.add(r);
                 }
             }
-            if (!typeOk) {
+            if (!tr.isEmpty()) {
+                use = tr; // aynı isimli cadde ve sokak varsa yazılan türe uyan seçilir
+            } else {
                 conf -= 5; // "sok." yazılmış, veride cadde (ya da tersi)
             }
         }
