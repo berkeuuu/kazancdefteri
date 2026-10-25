@@ -420,6 +420,10 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         if (headers.isEmpty()) {
+            if (autoGoToDaily(items, now)) {
+                setOverlay(false, "Günlük ekrana gidiliyor", "Telefona dokunma.");
+                return;
+            }
             setOverlay(false, "Okuma için hazır",
                     "Migpack'te Geçmiş Siparişlerim > Günlük sekmesini aç. Günler görünce okuma başlayacak.");
             return;
@@ -524,6 +528,43 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         finish(p);
+    }
+
+    private int goTries = 0;
+    private long goAt = 0L;
+
+    /**
+     * Günler görünmüyorsa Migpack'te "Geçmiş Siparişlerim" ve "Günlük" yazılarına kendisi dokunur.
+     * Sınırlı sayıda dener (yanlış yerlere sürekli basmasın); bulamazsa false döner ve eski yönlendirme yazısı gösterilir.
+     */
+    private boolean autoGoToDaily(ArrayList<Item> items, long now) {
+        if (now - goAt > 60000L) {
+            goTries = 0;
+        }
+        if (goTries >= 8) {
+            return false;
+        }
+        Item daily = null;
+        Item hist = null;
+        for (Item it : items) {
+            String f = NavHelper.fold(it.text).trim();
+            if (f.equals("gunluk") && daily == null) {
+                daily = it;
+            } else if (f.equals("gecmis siparislerim") && hist == null) {
+                hist = it;
+            }
+        }
+        Item target = daily != null ? daily : hist;
+        if (target == null) {
+            return false;
+        }
+        if (now - goAt < 1500L) {
+            return true; // az önce dokunduk, ekranın değişmesini bekle
+        }
+        goAt = now;
+        goTries++;
+        click(target.node);
+        return true;
     }
 
     private void finish(SharedPreferences p) {
