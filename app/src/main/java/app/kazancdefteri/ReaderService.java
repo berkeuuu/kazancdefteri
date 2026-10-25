@@ -420,6 +420,10 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         if (headers.isEmpty()) {
+            if (autoGoToDaily(root, items, now)) {
+                setOverlay(false, "Günlük ekrana gidiliyor", "Telefona dokunma.");
+                return;
+            }
             setOverlay(false, "Okuma için hazır",
                     "Migpack'te Geçmiş Siparişlerim > Günlük sekmesini aç. Günler görünce okuma başlayacak.");
             return;
@@ -524,6 +528,99 @@ public class ReaderService extends AccessibilityService {
             return;
         }
         finish(p);
+    }
+
+    private int goTries = 0;
+    private long goAt = 0L;
+
+    /**
+     * Günler görünmüyorsa Migpack'te kendisi gider: ana sayfa > profil simgesi > "Geçmiş Siparişler" > "Günlük".
+     * Başka bir sayfadaysa geri tuşuyla ana sayfaya döner. Sınırlı sayıda dener (dakikada 10);
+     * yapamazsa false döner ve eski yönlendirme yazısı gösterilir.
+     */
+    private boolean autoGoToDaily(AccessibilityNodeInfo root, ArrayList<Item> items, long now) {
+        if (now - goAt > 60000L) {
+            goTries = 0;
+        }
+        if (goTries >= 10) {
+            return false;
+        }
+        Item daily = null;
+        Item hist = null;
+        boolean home = false;
+        for (Item it : items) {
+            String f = NavHelper.fold(it.text).trim();
+            if (f.equals("gunluk") && daily == null) {
+                daily = it;
+            } else if ((f.equals("gecmis siparisler") || f.equals("gecmis siparislerim")) && hist == null) {
+                hist = it;
+            } else if (f.equals("gorev listesi") || f.equals("magazaya git") || f.equals("cevrim ici")
+                    || f.equals("cevrim disi")) {
+                home = true;
+            }
+        }
+        if (now - goAt < 1500L) {
+            return true; // az önce dokunduk, ekranın değişmesini bekle
+        }
+        Item target = daily != null ? daily : hist;
+        if (target == null && !home) {
+            goAt = now;
+            goTries++;
+            performGlobalAction(GLOBAL_ACTION_BACK); // ana sayfaya dön
+            return true;
+        }
+        if (target != null) {
+            goAt = now;
+            goTries++;
+            click(target.node);
+            return true;
+        }
+        // Ana sayfa: sol üstteki profil simgesi (yazısı yok, en küçük tıklanabilir öğe)
+        AccessibilityNodeInfo icon = findProfileIcon(root);
+        if (icon == null) {
+            return false;
+        }
+        goAt = now;
+        goTries++;
+        click(icon);
+        return true;
+    }
+
+    private AccessibilityNodeInfo findProfileIcon(AccessibilityNodeInfo root) {
+        Rect scr = new Rect();
+        root.getBoundsInScreen(scr);
+        ArrayList<AccessibilityNodeInfo> found = new ArrayList<AccessibilityNodeInfo>();
+        collectIconCandidates(root, scr, found, 0);
+        AccessibilityNodeInfo best = null;
+        long bestArea = Long.MAX_VALUE;
+        Rect r = new Rect();
+        for (AccessibilityNodeInfo n : found) {
+            n.getBoundsInScreen(r);
+            long area = (long) r.width() * (long) r.height();
+            if (area < bestArea) {
+                bestArea = area;
+                best = n;
+            }
+        }
+        return best;
+    }
+
+    private void collectIconCandidates(AccessibilityNodeInfo n, Rect scr, ArrayList<AccessibilityNodeInfo> out, int depth) {
+        if (n == null || depth > 40) {
+            return;
+        }
+        Rect r = new Rect();
+        n.getBoundsInScreen(r);
+        int w = scr.width();
+        int h = scr.height();
+        if (n.isClickable() && r.width() >= w / 20 && r.height() >= w / 20
+                && r.right <= scr.left + (int) (w * 0.35) && r.top >= scr.top + (int) (h * 0.05)
+                && r.bottom <= scr.top + (int) (h * 0.22)) {
+            out.add(n);
+        }
+        for (int i = 0; i < n.getChildCount(); i++) {
+            collectIconCandidates(n.getChild(i), scr, out, depth + 1);
+        }
     }
 
     private void finish(SharedPreferences p) {
