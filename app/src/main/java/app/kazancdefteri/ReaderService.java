@@ -421,11 +421,12 @@ public class ReaderService extends AccessibilityService {
         }
         if (headers.isEmpty()) {
             if (autoGoToDaily(root, items, now)) {
-                setOverlay(false, "Günlük ekrana gidiliyor", "Telefona dokunma.");
+                setOverlay(false, "Günlük ekrana gidiliyor", "Telefona dokunma. " + goInfo);
                 return;
             }
             setOverlay(false, "Okuma için hazır",
-                    "Migpack'te Geçmiş Siparişlerim > Günlük sekmesini aç. Günler görünce okuma başlayacak.");
+                    "Migpack'te Geçmiş Siparişler > Günlük sekmesini aç. Günler görünce okuma başlayacak."
+                            + (goInfo.length() > 0 ? " (Son deneme: " + goInfo + ")" : ""));
             return;
         }
         boolean todayMode = "today".equals(p.getString("mode", "all"));
@@ -532,17 +533,25 @@ public class ReaderService extends AccessibilityService {
 
     private int goTries = 0;
     private long goAt = 0L;
+    private String goSig = "";
+    private String goInfo = "";
 
     /**
      * Günler görünmüyorsa Migpack'te kendisi gider: ana sayfa > profil simgesi > "Geçmiş Siparişler" > "Günlük".
-     * Başka bir sayfadaysa geri tuşuyla ana sayfaya döner. Sınırlı sayıda dener (dakikada 10);
-     * yapamazsa false döner ve eski yönlendirme yazısı gösterilir.
+     * Başka bir sayfadaysa geri tuşuyla ana sayfaya döner. Ekran değiştikçe deneme sayacı sıfırlanır;
+     * aynı ekranda 6 denemede sonuç yoksa vazgeçer (false) ve nedeni goInfo'da kalır.
      */
     private boolean autoGoToDaily(AccessibilityNodeInfo root, ArrayList<Item> items, long now) {
-        if (now - goAt > 60000L) {
+        StringBuilder sg = new StringBuilder();
+        for (Item it : items) {
+            sg.append(it.text).append('|');
+        }
+        String sig = String.valueOf(sg.toString().hashCode());
+        if (!sig.equals(goSig) || now - goAt > 60000L) {
+            goSig = sig;
             goTries = 0;
         }
-        if (goTries >= 10) {
+        if (goTries >= 6) {
             return false;
         }
         Item daily = null;
@@ -554,36 +563,66 @@ public class ReaderService extends AccessibilityService {
                 daily = it;
             } else if ((f.equals("gecmis siparisler") || f.equals("gecmis siparislerim")) && hist == null) {
                 hist = it;
-            } else if (f.equals("gorev listesi") || f.equals("magazaya git") || f.equals("cevrim ici")
-                    || f.equals("cevrim disi")) {
-                home = true;
+            } else if (f.equals("cevrim ici") || f.equals("cevrim disi")) {
+                home = true; // ana sayfanın üstündeki durum kartı
             }
         }
         if (now - goAt < 1500L) {
             return true; // az önce dokunduk, ekranın değişmesini bekle
         }
         Item target = daily != null ? daily : hist;
-        if (target == null && !home) {
-            goAt = now;
-            goTries++;
-            performGlobalAction(GLOBAL_ACTION_BACK); // ana sayfaya dön
-            return true;
-        }
         if (target != null) {
             goAt = now;
             goTries++;
-            click(target.node);
+            String how = tap(target.node);
+            goInfo = (daily != null ? "Günlük" : "Geçmiş Siparişler") + " dokunuşu: " + how;
+            return true;
+        }
+        if (!home) {
+            goAt = now;
+            goTries++;
+            performGlobalAction(GLOBAL_ACTION_BACK); // ana sayfaya dön
+            goInfo = "Geri tuşu";
             return true;
         }
         // Ana sayfa: sol üstteki profil simgesi (yazısı yok, en küçük tıklanabilir öğe)
         AccessibilityNodeInfo icon = findProfileIcon(root);
         if (icon == null) {
+            goInfo = "Profil simgesi bulunamadı";
             return false;
         }
         goAt = now;
         goTries++;
-        click(icon);
+        goInfo = "Profil simgesi dokunuşu: " + tap(icon);
         return true;
+    }
+
+    /** Önce tıklanabilir üst öğelere tık, olmazsa ekranda o noktaya dokunuş hareketi. Hangi yolun işlediğini döndürür. */
+    private String tap(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo c = n;
+        for (int i = 0; i < 8 && c != null; i++) {
+            if (c.isClickable() && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return "tık";
+            }
+            c = c.getParent();
+        }
+        Rect r = new Rect();
+        n.getBoundsInScreen(r);
+        if (r.width() > 0 && r.height() > 0) {
+            try {
+                android.graphics.Path path = new android.graphics.Path();
+                path.moveTo(r.exactCenterX(), r.exactCenterY());
+                android.accessibilityservice.GestureDescription.Builder gb =
+                        new android.accessibilityservice.GestureDescription.Builder();
+                gb.addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60));
+                if (dispatchGesture(gb.build(), null, null)) {
+                    return "hareket";
+                }
+            } catch (Exception e) {
+                // aşağıda başarısız döner
+            }
+        }
+        return "olmadı";
     }
 
     private AccessibilityNodeInfo findProfileIcon(AccessibilityNodeInfo root) {
